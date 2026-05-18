@@ -125,6 +125,11 @@ export default function HomePage() {
     return `/api/videos/${videoId}/stream`;
   }, [videoId]);
 
+  const outputPreviewUrl = useMemo(() => {
+    if (!lastJob || lastJob.status !== "done") return null;
+    return `/api/jobs/${lastJob.jobId}/stream`;
+  }, [lastJob]);
+
   async function refreshMetadata(nextVideoId: string) {
     const res = await fetch(`/api/videos/${nextVideoId}/metadata`, { cache: "no-store" });
     const json = (await res.json()) as Metadata & { error?: string };
@@ -463,7 +468,7 @@ export default function HomePage() {
       </section>
 
       <section className="panel">
-        <h2>6) ジョブ状態 / ダウンロード</h2>
+        <h2>6) ジョブ状態 / プレビュー / ダウンロード</h2>
         {busy ? <p className="muted">{busy}</p> : null}
         {jobPhase ? (
           <p className="muted">
@@ -490,6 +495,14 @@ export default function HomePage() {
                 </>
               ) : null}
             </p>
+            {outputPreviewUrl ? (
+              <div style={{ marginTop: 14 }}>
+                <p className="muted" style={{ marginBottom: 8 }}>
+                  成果プレビュー（ブラウザ内再生）
+                </p>
+                <video key={lastJob.jobId} controls src={outputPreviewUrl} />
+              </div>
+            ) : null}
             {downloadHref ? (
               <p style={{ marginTop: 10 }}>
                 <a href={downloadHref} download>
