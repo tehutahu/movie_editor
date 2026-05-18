@@ -1,0 +1,150 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    "Apple Color Emoji",
+    "Segoe UI Emoji";
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: #0f1115;
+  color: #eef0f6;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.panel {
+  background: #171a21;
+  border: 1px solid #273043;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+h1 {
+  font-size: 1.55rem;
+  margin: 0 0 8px;
+}
+
+h2 {
+  font-size: 1.08rem;
+  margin: 0 0 10px;
+  color: #b8c6ff;
+}
+
+p.muted {
+  color: #9aa4b9;
+  font-size: 0.93rem;
+  margin: 0 0 12px;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin: 12px 0 6px;
+  font-size: 0.9rem;
+}
+
+input[type="file"],
+input[type="number"],
+input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #324061;
+  background: #0f1115;
+  color: #eef0f6;
+}
+
+textarea {
+  width: 100%;
+  padding: 10px 10px;
+  border-radius: 8px;
+  border: 1px solid #324061;
+  background: #0f1115;
+  color: #eef0f6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 0.9rem;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.row > * {
+  flex: 1 1 180px;
+}
+
+button {
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid #3b4b7f;
+  background: #243462;
+  color: #eaf0ff;
+  padding: 9px 12px;
+  font-weight: 700;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: transparent;
+}
+
+video {
+  width: 100%;
+  max-height: 420px;
+  border-radius: 8px;
+  background: #000;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  border: 1px solid #3b4b7f;
+  color: #c8d9ff;
+  margin-right: 6px;
+}
+
+.error {
+  color: #ffb3b8;
+}
+
+.ok {
+  color: #bff7cf;
+}
+
+code {
+  background: #0f1115;
+  border: 1px solid #324061;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.9em;
+}
