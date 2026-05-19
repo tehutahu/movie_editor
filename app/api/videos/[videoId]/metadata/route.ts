@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { assertFfmpegAvailable, probeVideo } from "@/lib/ffmpeg";
 import { findUploadInputPath } from "@/lib/storage";
 import { assertUploadFileBelongsToVideo } from "@/lib/pathGuard";
+import { assertStorageId } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,7 @@ export async function GET(
   try {
     await assertFfmpegAvailable();
     const { videoId } = await ctx.params;
+    assertStorageId("videoId", videoId);
     const inputPath = await findUploadInputPath(videoId);
     if (!inputPath) {
       return NextResponse.json({ error: "動画が見つかりません。" }, { status: 404 });

@@ -4,7 +4,10 @@ import {
   newVideoId,
   saveUploadedVideo,
 } from "@/lib/storage";
-import { parseAllowedVideoExtension } from "@/lib/validation";
+import {
+  MAX_UPLOAD_BYTES,
+  parseAllowedVideoExtension,
+} from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -28,6 +31,15 @@ export async function POST(req: Request) {
             "未対応の拡張子です（mp4/mkv/avi/mov/flv/wmvのみ）。",
         },
         { status: 400 },
+      );
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        {
+          error: `ファイルサイズが上限（${MAX_UPLOAD_BYTES} バイト）を超えています。`,
+        },
+        { status: 413 },
       );
     }
 

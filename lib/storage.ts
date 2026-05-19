@@ -2,6 +2,8 @@ import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { UPLOADS_ROOT, JOBS_ROOT } from "@/lib/paths";
+import { assertInsideDir } from "@/lib/pathGuard";
+import { assertStorageId } from "@/lib/validation";
 
 export async function ensureStorageTrees(): Promise<void> {
   await mkdir(UPLOADS_ROOT, { recursive: true });
@@ -24,7 +26,10 @@ export async function atomicWriteTmpThenRename(absPathFinal: string, data: Uint8
 }
 
 export function uploadVideoDir(videoId: string): string {
-  return path.join(UPLOADS_ROOT, videoId);
+  assertStorageId("videoId", videoId);
+  const dir = path.join(UPLOADS_ROOT, videoId);
+  assertInsideDir(UPLOADS_ROOT, dir);
+  return dir;
 }
 
 /** `storage/uploads/<id>/input.<ext>` へ保存します。 */
@@ -53,7 +58,10 @@ export async function findUploadInputPath(videoId: string): Promise<string | nul
 }
 
 export function jobDir(jobId: string): string {
-  return path.join(JOBS_ROOT, jobId);
+  assertStorageId("jobId", jobId);
+  const dir = path.join(JOBS_ROOT, jobId);
+  assertInsideDir(JOBS_ROOT, dir);
+  return dir;
 }
 
 export async function ensureJobDir(jobId: string): Promise<string> {

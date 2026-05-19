@@ -1,6 +1,7 @@
 import { getJobRecord } from "@/lib/jobs";
 import { buildFileStreamResponse } from "@/lib/fileStream";
 import { assertJobOutputFile } from "@/lib/pathGuard";
+import { assertStorageId } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,14 @@ export async function GET(
   ctx: { params: Promise<{ jobId: string }> },
 ) {
   const { jobId } = await ctx.params;
+  try {
+    assertStorageId("jobId", jobId);
+  } catch (e) {
+    return Response.json(
+      { error: e instanceof Error ? e.message : String(e) },
+      { status: 400 },
+    );
+  }
   const job = getJobRecord(jobId);
   if (!job) {
     return Response.json({ error: "ジョブが見つかりません。" }, { status: 404 });

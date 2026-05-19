@@ -8,7 +8,11 @@ import {
 } from "@/lib/jobs";
 import { assertJobOutputFile, assertUploadFileBelongsToVideo } from "@/lib/pathGuard";
 import { ensureJobDir, findUploadInputPath } from "@/lib/storage";
-import { assertPositiveInt, assertPositiveNumber } from "@/lib/validation";
+import {
+  assertPositiveInt,
+  assertPositiveNumber,
+  assertStorageId,
+} from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -29,10 +33,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "JSON body が不正です。" }, { status: 400 });
     }
 
-    const videoId = typeof body.videoId === "string" ? body.videoId : "";
-    if (!videoId) {
+    const videoIdRaw = typeof body.videoId === "string" ? body.videoId : "";
+    if (!videoIdRaw) {
       return NextResponse.json({ error: "videoId が必要です。" }, { status: 400 });
     }
+    const videoId = assertStorageId("videoId", videoIdRaw);
 
     const speedFactor = assertPositiveNumber("speedFactor", body.speedFactor);
     const sampleRateHz = assertPositiveInt("sampleRateHz", body.sampleRateHz);
