@@ -97,6 +97,7 @@ export async function POST(req: Request) {
         listTxtAbsolutePath: listAbs,
         outputPath: outAbs,
         outputHasAudio: meta.hasAudio,
+        totalDurationSec: totalKeptSec > 0 ? totalKeptSec : undefined,
         onProgress: (p) => patchJobRecord(job.id, {
           currentStep: "merge",
           progressPct: typeof p.progressPct === "number" ? 90 + p.progressPct * 0.1 : 90,

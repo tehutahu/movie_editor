@@ -38,11 +38,12 @@ function run(cmd: string, args: readonly string[]): Promise<CmdResult> {
   });
 }
 
-function parseOutTimeMs(line: string): number | undefined {
+/** ffmpeg -progress の out_time_ms は名前に反してマイクロ秒単位 */
+function parseProgressOutTimeSec(line: string): number | undefined {
   const m = /^out_time_ms=(\d+)$/.exec(line.trim());
   if (!m) return undefined;
-  const ms = Number(m[1]);
-  return Number.isFinite(ms) ? ms / 1000 : undefined;
+  const micros = Number(m[1]);
+  return Number.isFinite(micros) ? micros / 1_000_000 : undefined;
 }
 
 async function ffmpegFailFast(args: readonly string[], opts?: {
@@ -66,7 +67,7 @@ async function ffmpegFailFast(args: readonly string[], opts?: {
       progressBuf = lines.pop() ?? "";
 
       for (const line of lines) {
-        const outSec = parseOutTimeMs(line);
+        const outSec = parseProgressOutTimeSec(line);
         if (typeof outSec !== "number") continue;
         const totalSec = opts?.totalDurationSec;
         if (!totalSec || totalSec <= 0) {
@@ -220,7 +221,11 @@ export async function restoreSpeedSameAsShell(params: {
       "-strict",
       "experimental",
       params.outputPath,
-    ], { totalDurationSec: info.durationSec, onProgress: params.onProgress });
+    ], {
+      // setpts で出力タイムラインが speed 倍に伸びる
+      totalDurationSec: info.durationSec * speed,
+      onProgress: params.onProgress,
+    });
     return;
   }
 
@@ -235,7 +240,10 @@ export async function restoreSpeedSameAsShell(params: {
     "libx264",
     "-an",
     params.outputPath,
-  ], { totalDurationSec: info.durationSec, onProgress: params.onProgress });
+  ], {
+    totalDurationSec: info.durationSec * speed,
+    onProgress: params.onProgress,
+  });
 }
 
 export async function extractSegmentTimes(params: {
@@ -281,6 +289,7 @@ export async function concatViaDemuxer(params: {
   listTxtAbsolutePath: string;
   outputPath: string;
   outputHasAudio: boolean;
+  totalDurationSec?: number | undefined;
   onProgress?: ((p: ProgressInfo) => void) | undefined;
 }): Promise<void> {
   await ffmpegFailFast([
@@ -297,5 +306,8 @@ export async function concatViaDemuxer(params: {
     "-movflags",
     "+faststart",
     params.outputPath,
-  ], { onProgress: params.onProgress });
+  ], {
+    totalDurationSec: params.totalDurationSec,
+    onProgress: params.onProgress,
+  });
 }
