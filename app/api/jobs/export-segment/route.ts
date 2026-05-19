@@ -48,6 +48,7 @@ export async function POST(req: Request) {
     const job = createJobRecord("export_segment");
     patchJobRecord(job.id, {
       downloadName: `segment_${range.startSec}-${range.endSec}.mp4`,
+      currentStep: "segment",
     });
 
     runDetached(job.id, async () => {
@@ -58,6 +59,11 @@ export async function POST(req: Request) {
         outputPath: outAbs,
         startSec: range.startSec,
         endSec: range.endSec,
+        onProgress: (p) => patchJobRecord(job.id, {
+          currentStep: "segment",
+          progressPct: p.progressPct,
+          etaSec: p.etaSec,
+        }),
       });
       assertJobOutputFile(job.id, outAbs);
       patchJobRecord(job.id, { outputPath: outAbs });

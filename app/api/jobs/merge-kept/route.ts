@@ -51,10 +51,12 @@ export async function POST(req: Request) {
     const kept = keptRangesAfterRemovals(meta.durationSec, remove);
 
     const job = createJobRecord("merge_kept");
-    patchJobRecord(job.id, { downloadName: "merged_removed_gaps.mp4" });
+    patchJobRecord(job.id, { downloadName: "merged_removed_gaps.mp4", currentStep: "segment" });
 
     runDetached(job.id, async () => {
       const jobDirAbs = await ensureJobDir(job.id);
+      const totalKeptSec = kept.reduce((sum, r) => sum + Math.max(0, r.endSec - r.startSec), 0);
+      let completedSec = 0;
       const parts: string[] = [];
 
       for (let i = 0; i < kept.length; i += 1) {
@@ -64,12 +66,24 @@ export async function POST(req: Request) {
           `part_${String(i).padStart(3, "0")}.mp4`,
         );
 
+        const partDurationSec = Math.max(0, r.endSec - r.startSec);
         await extractSegmentTimes({
           inputPath,
           outputPath: partAbs,
           startSec: r.startSec,
           endSec: r.endSec,
+          onProgress: (p) => {
+            const localPct = (p.progressPct ?? 0) / 100;
+            const processedSec = completedSec + partDurationSec * localPct;
+            const progressPct = totalKeptSec > 0 ? (processedSec / totalKeptSec) * 90 : undefined;
+            patchJobRecord(job.id, {
+              currentStep: "segment",
+              progressPct,
+              etaSec: p.etaSec,
+            });
+          },
         });
+        completedSec += partDurationSec;
         assertJobOutputFile(job.id, partAbs);
         parts.push(partAbs);
       }
@@ -78,10 +92,17 @@ export async function POST(req: Request) {
       await writeFile(listAbs, buildConcatDemuxerListFile(parts), "utf8");
 
       const outAbs = path.join(jobDirAbs, "output_merged.mp4");
+      patchJobRecord(job.id, { currentStep: "merge", progressPct: 90, etaSec: undefined });
       await concatViaDemuxer({
         listTxtAbsolutePath: listAbs,
         outputPath: outAbs,
         outputHasAudio: meta.hasAudio,
+        totalDurationSec: totalKeptSec > 0 ? totalKeptSec : undefined,
+        onProgress: (p) => patchJobRecord(job.id, {
+          currentStep: "merge",
+          progressPct: typeof p.progressPct === "number" ? 90 + p.progressPct * 0.1 : 90,
+          etaSec: p.etaSec,
+        }),
       });
 
       assertJobOutputFile(job.id, outAbs);
