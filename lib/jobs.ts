@@ -39,6 +39,11 @@ export function patchJobRecord(jobId: string, patch: Partial<JobRecord>): void {
   jobs.set(jobId, { ...cur, ...patch });
 }
 
+/** テストのみ: in-memory のジョブ一覧をクリアします。 */
+export function clearJobStoreForTests(): void {
+  jobs.clear();
+}
+
 /** `pending` / `running` のジョブディレクトリはストレージ整理から除外します。 */
 export function listPendingRunningJobIds(): string[] {
   const out: string[] = [];
