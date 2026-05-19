@@ -39,6 +39,15 @@ export function patchJobRecord(jobId: string, patch: Partial<JobRecord>): void {
   jobs.set(jobId, { ...cur, ...patch });
 }
 
+/** `pending` / `running` のジョブディレクトリはストレージ整理から除外します。 */
+export function listPendingRunningJobIds(): string[] {
+  const out: string[] = [];
+  for (const [id, rec] of jobs) {
+    if (rec.status === "pending" || rec.status === "running") out.push(id);
+  }
+  return out;
+}
+
 export function runDetached(jobId: string, fn: () => Promise<void>): void {
   void (async () => {
     patchJobRecord(jobId, {

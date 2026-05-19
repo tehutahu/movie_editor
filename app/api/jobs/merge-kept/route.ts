@@ -1,5 +1,5 @@
 import path from "node:path";
-import { writeFile } from "node:fs/promises";
+import { readdir, unlink, writeFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import {
   assertFfmpegAvailable,
@@ -13,8 +13,9 @@ import {
   patchJobRecord,
   runDetached,
 } from "@/lib/jobs";
-import { assertJobOutputFile, assertUploadFileBelongsToVideo } from "@/lib/pathGuard";
-import { ensureJobDir, findUploadInputPath } from "@/lib/storage";
+import { resolveInputPath } from "@/lib/mediaSource";
+import { assertJobOutputFile } from "@/lib/pathGuard";
+import { ensureJobDir, pruneJobsAfterComplete } from "@/lib/storage";
 import {
   assertStorageId,
   keptRangesAfterRemovals,
@@ -25,9 +26,25 @@ export const runtime = "nodejs";
 
 type Body = {
   videoId?: string;
+  /** 指定時はこのジョブの成果ファイルを入力にします（完了済みのみ）。 */
+  sourceJobId?: string;
   /** 動画から「削除」する区間（秒）。残りを結合します。 */
   removeRanges?: unknown;
 };
+
+async function unlinkPartExtractions(jobDirAbs: string): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(jobDirAbs);
+  } catch {
+    return;
+  }
+  await Promise.all(
+    names
+      .filter((n) => /^part_\d{3}\.mp4$/i.test(n))
+      .map((n) => unlink(path.join(jobDirAbs, n)).catch(() => undefined)),
+  );
+}
 
 export async function POST(req: Request) {
   try {
@@ -45,11 +62,18 @@ export async function POST(req: Request) {
     }
     const videoId = assertStorageId("videoId", videoIdRaw);
 
-    const inputPath = await findUploadInputPath(videoId);
-    if (!inputPath) {
-      return NextResponse.json({ error: "動画が見つかりません。" }, { status: 404 });
+    let inputPath: string;
+    try {
+      const resolved = await resolveInputPath({
+        videoId,
+        sourceJobId: body.sourceJobId,
+      });
+      inputPath = resolved.inputPath;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const status = msg.includes("見つかりません") ? 404 : 400;
+      return NextResponse.json({ error: msg }, { status });
     }
-    assertUploadFileBelongsToVideo(videoId, inputPath);
 
     const meta = await probeVideo(inputPath);
     const remove = normalizeRanges(meta.durationSec, body.removeRanges);
@@ -103,15 +127,19 @@ export async function POST(req: Request) {
         outputPath: outAbs,
         outputHasAudio: meta.hasAudio,
         totalDurationSec: totalKeptSec > 0 ? totalKeptSec : undefined,
-        onProgress: (p) => patchJobRecord(job.id, {
-          currentStep: "merge",
-          progressPct: typeof p.progressPct === "number" ? 90 + p.progressPct * 0.1 : 90,
-          etaSec: p.etaSec,
-        }),
+        onProgress: (p) =>
+          patchJobRecord(job.id, {
+            currentStep: "merge",
+            progressPct: typeof p.progressPct === "number" ? 90 + p.progressPct * 0.1 : 90,
+            etaSec: p.etaSec,
+          }),
       });
+
+      await unlinkPartExtractions(jobDirAbs);
 
       assertJobOutputFile(job.id, outAbs);
       patchJobRecord(job.id, { outputPath: outAbs });
+      await pruneJobsAfterComplete(job.id);
     });
 
     return NextResponse.json({

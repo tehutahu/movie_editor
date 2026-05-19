@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { UPLOADS_ROOT, JOBS_ROOT } from "@/lib/paths";
 import { assertInsideDir } from "@/lib/pathGuard";
 import { assertStorageId } from "@/lib/validation";
+import { pruneJobsStorage, pruneUploadStorage } from "@/lib/storageRetention";
 
 export async function ensureStorageTrees(): Promise<void> {
   await mkdir(UPLOADS_ROOT, { recursive: true });
@@ -68,4 +69,14 @@ export async function ensureJobDir(jobId: string): Promise<string> {
   const dir = jobDir(jobId);
   await mkdir(dir, { recursive: true });
   return dir;
+}
+
+/** アップロード直後に古い uploads を整理（新規 `videoId` は保護）。 */
+export async function pruneUploadsAfterSave(videoId: string): Promise<void> {
+  await pruneUploadStorage([videoId]);
+}
+
+/** ジョブ完了後に古い jobs を整理（当該 `jobId` と進行中ジョブは保護）。 */
+export async function pruneJobsAfterComplete(jobId: string): Promise<void> {
+  await pruneJobsStorage([jobId]);
 }

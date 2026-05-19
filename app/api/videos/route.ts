@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   ensureStorageTrees,
   newVideoId,
+  pruneUploadsAfterSave,
   saveUploadedVideo,
 } from "@/lib/storage";
 import {
@@ -46,6 +47,7 @@ export async function POST(req: Request) {
     const buf = new Uint8Array(await file.arrayBuffer());
     const videoId = newVideoId();
     await saveUploadedVideo({ videoId, ext, bytes: buf });
+    await pruneUploadsAfterSave(videoId);
 
     return NextResponse.json({ videoId, originalName: file.name, ext });
   } catch (e) {
