@@ -6,8 +6,9 @@ import {
   patchJobRecord,
   runDetached,
 } from "@/lib/jobs";
-import { assertJobOutputFile, assertUploadFileBelongsToVideo } from "@/lib/pathGuard";
-import { ensureJobDir, findUploadInputPath } from "@/lib/storage";
+import { assertJobOutputFile } from "@/lib/pathGuard";
+import { resolveInputPath } from "@/lib/mediaSource";
+import { ensureJobDir, pruneJobsAfterComplete } from "@/lib/storage";
 import {
   assertPositiveInt,
   assertPositiveNumber,
@@ -18,6 +19,8 @@ export const runtime = "nodejs";
 
 type Body = {
   videoId?: string;
+  /** 指定時はこのジョブの成果ファイルを入力にします（完了済みのみ）。 */
+  sourceJobId?: string;
   speedFactor?: number;
   sampleRateHz?: number;
 };
@@ -42,11 +45,18 @@ export async function POST(req: Request) {
     const speedFactor = assertPositiveNumber("speedFactor", body.speedFactor);
     const sampleRateHz = assertPositiveInt("sampleRateHz", body.sampleRateHz);
 
-    const inputPath = await findUploadInputPath(videoId);
-    if (!inputPath) {
-      return NextResponse.json({ error: "動画が見つかりません。" }, { status: 404 });
+    let inputPath: string;
+    try {
+      const resolved = await resolveInputPath({
+        videoId,
+        sourceJobId: body.sourceJobId,
+      });
+      inputPath = resolved.inputPath;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const status = msg.includes("見つかりません") ? 404 : 400;
+      return NextResponse.json({ error: msg }, { status });
     }
-    assertUploadFileBelongsToVideo(videoId, inputPath);
 
     const job = createJobRecord("restore");
     patchJobRecord(job.id, {
@@ -71,6 +81,7 @@ export async function POST(req: Request) {
 
       assertJobOutputFile(job.id, outAbs);
       patchJobRecord(job.id, { outputPath: outAbs });
+      await pruneJobsAfterComplete(job.id);
     });
 
     return NextResponse.json({ jobId: job.id });
