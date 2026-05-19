@@ -19,6 +19,9 @@ type JobInfo = {
   status: JobStatus;
   error?: string | undefined;
   downloadName?: string | undefined;
+  progressPct?: number | undefined;
+  etaSec?: number | undefined;
+  currentStep?: string | undefined;
 };
 
 function parseRemoveRangesText(text: string): { startSec: number; endSec: number }[] {
@@ -53,7 +56,7 @@ function parseRemoveRangesText(text: string): { startSec: number; endSec: number
 
 async function pollJobUntil(
   jobId: string,
-  opts: { onTick?: (s: JobStatus) => void; timeoutMs?: number } = {},
+  opts: { onTick?: (j: JobInfo) => void; timeoutMs?: number } = {},
 ): Promise<JobInfo> {
   const timeoutMs = opts.timeoutMs ?? 1000 * 60 * 60;
   const started = Date.now();
@@ -70,6 +73,9 @@ async function pollJobUntil(
       status?: JobStatus;
       error?: string;
       downloadName?: string;
+      progressPct?: number;
+      etaSec?: number;
+      currentStep?: string;
     };
 
     if (!res.ok) {
@@ -77,23 +83,20 @@ async function pollJobUntil(
     }
 
     const status = json.status ?? "pending";
-    opts.onTick?.(status);
+    const info: JobInfo = {
+      jobId,
+      kind: String(json.kind ?? ""),
+      status,
+      error: json.error,
+      downloadName: json.downloadName,
+      progressPct: typeof json.progressPct === "number" ? json.progressPct : undefined,
+      etaSec: typeof json.etaSec === "number" ? json.etaSec : undefined,
+      currentStep: typeof json.currentStep === "string" ? json.currentStep : undefined,
+    };
+    opts.onTick?.(info);
 
-    if (status === "done") {
-      return {
-        jobId,
-        kind: String(json.kind ?? ""),
-        status,
-        downloadName: json.downloadName,
-      };
-    }
-    if (status === "error") {
-      return {
-        jobId,
-        kind: String(json.kind ?? ""),
-        status,
-        error: json.error,
-      };
+    if (status === "done" || status === "error") {
+      return info;
     }
 
     await new Promise((r) => setTimeout(r, 750));
@@ -119,6 +122,7 @@ export default function HomePage() {
 
   const [lastJob, setLastJob] = useState<JobInfo | null>(null);
   const [jobPhase, setJobPhase] = useState<string | null>(null);
+  const [liveJob, setLiveJob] = useState<JobInfo | null>(null);
 
   const streamUrl = useMemo(() => {
     if (!videoId) return null;
@@ -194,7 +198,10 @@ export default function HomePage() {
       if (!json.jobId) throw new Error("jobId が返りませんでした。");
 
       const info = await pollJobUntil(json.jobId, {
-        onTick: (s) => setJobPhase(`restore:${s}`),
+        onTick: (j) => {
+          setJobPhase(`restore:${j.status}`);
+          setLiveJob(j);
+        },
       });
       setLastJob(info);
       if (info.status === "error") throw new Error(info.error ?? "復元に失敗しました。");
@@ -203,6 +210,7 @@ export default function HomePage() {
     } finally {
       setBusy(null);
       setJobPhase(null);
+      setLiveJob(null);
     }
   }
 
@@ -231,7 +239,10 @@ export default function HomePage() {
       if (!json.jobId) throw new Error("jobId が返りませんでした。");
 
       const info = await pollJobUntil(json.jobId, {
-        onTick: (s) => setJobPhase(`segment:${s}`),
+        onTick: (j) => {
+          setJobPhase(`segment:${j.status}`);
+          setLiveJob(j);
+        },
       });
       setLastJob(info);
       if (info.status === "error") throw new Error(info.error ?? "区間書き出しに失敗しました。");
@@ -240,6 +251,7 @@ export default function HomePage() {
     } finally {
       setBusy(null);
       setJobPhase(null);
+      setLiveJob(null);
     }
   }
 
@@ -265,7 +277,10 @@ export default function HomePage() {
       if (!json.jobId) throw new Error("jobId が返りませんでした。");
 
       const info = await pollJobUntil(json.jobId, {
-        onTick: (s) => setJobPhase(`merge:${s}`),
+        onTick: (j) => {
+          setJobPhase(`merge:${j.status}`);
+          setLiveJob(j);
+        },
       });
       setLastJob(info);
       if (info.status === "error") throw new Error(info.error ?? "結合に失敗しました。");
@@ -274,6 +289,7 @@ export default function HomePage() {
     } finally {
       setBusy(null);
       setJobPhase(null);
+      setLiveJob(null);
     }
   }
 
@@ -471,6 +487,17 @@ export default function HomePage() {
           </p>
         ) : null}
         {error ? <p className="error">{error}</p> : null}
+        {liveJob && typeof liveJob.progressPct === "number" ? (
+          <div style={{ marginTop: 8 }}>
+            <p className="muted">
+              step: <code>{liveJob.currentStep ?? "processing"}</code> / progress: <code>{liveJob.progressPct.toFixed(1)}%</code>
+              {typeof liveJob.etaSec === "number" ? (
+                <> / 推定残り時間: <code>{liveJob.etaSec}s</code></>
+              ) : null}
+            </p>
+            <progress max={100} value={Math.max(0, Math.min(100, liveJob.progressPct))} style={{ width: "100%" }} />
+          </div>
+        ) : null}
 
         {lastJob ? (
           <>

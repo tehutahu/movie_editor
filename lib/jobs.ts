@@ -10,6 +10,9 @@ export type JobRecord = {
   outputPath?: string | undefined;
   downloadName?: string | undefined;
   error?: string | undefined;
+  progressPct?: number | undefined;
+  etaSec?: number | undefined;
+  currentStep?: string | undefined;
 };
 
 const jobs = new Map<string, JobRecord>();
@@ -38,10 +41,16 @@ export function patchJobRecord(jobId: string, patch: Partial<JobRecord>): void {
 
 export function runDetached(jobId: string, fn: () => Promise<void>): void {
   void (async () => {
-    patchJobRecord(jobId, { status: "running", error: undefined });
+    patchJobRecord(jobId, {
+      status: "running",
+      error: undefined,
+      progressPct: undefined,
+      etaSec: undefined,
+      currentStep: undefined,
+    });
     try {
       await fn();
-      patchJobRecord(jobId, { status: "done" });
+      patchJobRecord(jobId, { status: "done", progressPct: 100, etaSec: 0 });
     } catch (e) {
       patchJobRecord(jobId, {
         status: "error",

@@ -20,6 +20,9 @@ export async function GET(
     createdAtMs: job.createdAtMs,
     downloadName: job.downloadName,
     error: job.error,
+    progressPct: job.progressPct,
+    etaSec: job.etaSec,
+    currentStep: job.currentStep,
     hasOutput: Boolean(job.outputPath),
   });
 }

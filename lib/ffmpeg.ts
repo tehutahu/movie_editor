@@ -14,6 +14,11 @@ type CmdResult = {
   stderr: string;
 };
 
+type ProgressInfo = {
+  progressPct?: number;
+  etaSec?: number;
+};
+
 function run(cmd: string, args: readonly string[]): Promise<CmdResult> {
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, [...args], { stdio: ["ignore", "pipe", "pipe"] });
@@ -30,6 +35,72 @@ function run(cmd: string, args: readonly string[]): Promise<CmdResult> {
     proc.once("close", (code) =>
       resolve({ exitCode: code, stdout, stderr }),
     );
+  });
+}
+
+function parseOutTimeMs(line: string): number | undefined {
+  const m = /^out_time_ms=(\d+)$/.exec(line.trim());
+  if (!m) return undefined;
+  const ms = Number(m[1]);
+  return Number.isFinite(ms) ? ms / 1000 : undefined;
+}
+
+async function ffmpegFailFast(args: readonly string[], opts?: {
+  totalDurationSec?: number;
+  onProgress?: ((p: ProgressInfo) => void) | undefined;
+}): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn("ffmpeg", ["-progress", "pipe:1", ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+    let progressBuf = "";
+    const startedAtMs = Date.now();
+
+    proc.stdout.on("data", (d: Buffer | string) => {
+      const chunk = typeof d === "string" ? d : d.toString("utf8");
+      progressBuf += chunk;
+
+      const lines = progressBuf.split(/\r?\n/);
+      progressBuf = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const outSec = parseOutTimeMs(line);
+        if (typeof outSec !== "number") continue;
+        const totalSec = opts?.totalDurationSec;
+        if (!totalSec || totalSec <= 0) {
+          opts?.onProgress?.({});
+          continue;
+        }
+
+        const pct = Math.max(0, Math.min(100, (outSec / totalSec) * 100));
+        const elapsedSec = Math.max(0.001, (Date.now() - startedAtMs) / 1000);
+        const speed = outSec / elapsedSec;
+        const remainingInputSec = Math.max(0, totalSec - outSec);
+        const etaSec = speed > 0 ? Math.ceil(remainingInputSec / speed) : undefined;
+
+        opts?.onProgress?.({ progressPct: pct, etaSec });
+      }
+    });
+
+    proc.stderr.on("data", (d: Buffer | string) => {
+      stderr += typeof d === "string" ? d : d.toString("utf8");
+    });
+
+    proc.once("error", reject);
+    proc.once("close", (code) => {
+      if (code !== 0) {
+        reject(
+          new Error(
+            `ffmpeg が失敗しました（exit=${code}）:
+${stderr.trim().slice(-4000)}`,
+          ),
+        );
+        return;
+      }
+      resolve();
+    });
   });
 }
 
@@ -102,15 +173,6 @@ export async function probeVideo(inputPath: string): Promise<ProbeInfo> {
   };
 }
 
-async function ffmpegFailFast(args: readonly string[]): Promise<void> {
-  const result = await run("ffmpeg", args);
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `ffmpeg が失敗しました（exit=${result.exitCode}）:\n${result.stderr.trim().slice(-4000)}`,
-    );
-  }
-}
-
 /** `restore_speed.sh` と同等: setpts / asetrate+aresample */
 export async function restoreSpeedSameAsShell(params: {
   inputPath: string;
@@ -118,21 +180,18 @@ export async function restoreSpeedSameAsShell(params: {
   speedFactor: number;
   sampleRateHz: number;
   hasAudioHint?: boolean | undefined;
+  onProgress?: ((p: ProgressInfo) => void) | undefined;
 }): Promise<void> {
   const speed = params.speedFactor;
   const sr = params.sampleRateHz;
 
   let hasAudio = params.hasAudioHint;
 
+  const info = await probeVideo(params.inputPath);
+
   // ヒント無しでも ffprobe が取れれば自動判定する
   if (typeof hasAudio !== "boolean") {
-    let info: ProbeInfo;
-    try {
-      info = await probeVideo(params.inputPath);
-      hasAudio = info.hasAudio;
-    } catch {
-      hasAudio = true;
-    }
+    hasAudio = info.hasAudio;
   }
 
   const pts = `[0:v]setpts=${speed}*PTS`;
@@ -161,7 +220,7 @@ export async function restoreSpeedSameAsShell(params: {
       "-strict",
       "experimental",
       params.outputPath,
-    ]);
+    ], { totalDurationSec: info.durationSec, onProgress: params.onProgress });
     return;
   }
 
@@ -176,7 +235,7 @@ export async function restoreSpeedSameAsShell(params: {
     "libx264",
     "-an",
     params.outputPath,
-  ]);
+  ], { totalDurationSec: info.durationSec, onProgress: params.onProgress });
 }
 
 export async function extractSegmentTimes(params: {
@@ -184,6 +243,7 @@ export async function extractSegmentTimes(params: {
   outputPath: string;
   startSec: number;
   endSec: number;
+  onProgress?: ((p: ProgressInfo) => void) | undefined;
 }): Promise<void> {
   const durationSec = Math.max(0, params.endSec - params.startSec);
   const info = await probeVideo(params.inputPath);
@@ -202,12 +262,10 @@ export async function extractSegmentTimes(params: {
     "-movflags",
     "+faststart",
     params.outputPath,
-  ]);
+  ], { totalDurationSec: durationSec, onProgress: params.onProgress });
 }
 
 function escapeConcatDemuxerSingleQuotedPath(absPath: string): string {
-  // concat demuxer: file 'PATH'
-  // PATH 内部のシングルクォートは '\'' でエスケープ
   return absPath.replaceAll("'", "'\\''");
 }
 
@@ -222,8 +280,8 @@ export function buildConcatDemuxerListFile(entries: readonly string[]): string {
 export async function concatViaDemuxer(params: {
   listTxtAbsolutePath: string;
   outputPath: string;
-  /** すべての入力セグメントに音声が無いことが分かっているなら false */
   outputHasAudio: boolean;
+  onProgress?: ((p: ProgressInfo) => void) | undefined;
 }): Promise<void> {
   await ffmpegFailFast([
     "-y",
@@ -239,5 +297,5 @@ export async function concatViaDemuxer(params: {
     "-movflags",
     "+faststart",
     params.outputPath,
-  ]);
+  ], { onProgress: params.onProgress });
 }

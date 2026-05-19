@@ -46,6 +46,7 @@ export async function POST(req: Request) {
     const job = createJobRecord("restore");
     patchJobRecord(job.id, {
       downloadName: `restored_${speedFactor}x_${sampleRateHz}hz.mp4`,
+      currentStep: "restore",
     });
 
     runDetached(job.id, async () => {
@@ -56,6 +57,11 @@ export async function POST(req: Request) {
         outputPath: outAbs,
         speedFactor,
         sampleRateHz,
+        onProgress: (p) => patchJobRecord(job.id, {
+          currentStep: "restore",
+          progressPct: p.progressPct,
+          etaSec: p.etaSec,
+        }),
       });
 
       assertJobOutputFile(job.id, outAbs);
