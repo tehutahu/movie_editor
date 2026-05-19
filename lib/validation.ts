@@ -1,3 +1,25 @@
+/** `randomUUID()` で発行する storage / job ID（パストラバーサル防止） */
+const STORAGE_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function assertStorageId(label: string, value: string): string {
+  if (!STORAGE_ID_RE.test(value)) {
+    throw new Error(`${label} の形式が不正です。`);
+  }
+  return value;
+}
+
+/** デフォルト 8 GiB。`MAX_UPLOAD_BYTES` 環境変数で上書き可。 */
+export const MAX_UPLOAD_BYTES = (() => {
+  const raw = process.env.MAX_UPLOAD_BYTES;
+  if (raw === undefined || raw === "") return 8 * 1024 ** 3;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error("MAX_UPLOAD_BYTES は正の数である必要があります。");
+  }
+  return Math.floor(n);
+})();
+
 export const ALLOWED_VIDEO_EXT = new Set([
   "mp4",
   "mkv",
