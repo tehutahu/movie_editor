@@ -43,8 +43,13 @@ function assertFiniteNonNegative(label: string, value: unknown): number {
 }
 
 /** 入力区間 [{start,end}, ...] を検証して正規化（秒単位）。 */
-export function normalizeRanges(durationSec: number, raw: unknown): Range[] {
+export function normalizeRanges(
+  durationSec: number,
+  raw: unknown,
+  opts: { allowEmpty?: boolean } = {},
+): Range[] {
   if (!Array.isArray(raw) || raw.length === 0) {
+    if (opts.allowEmpty) return [];
     throw new Error("区間は配列で1件以上指定してください（例: [{ startSec: 0, endSec: 10 }]）。");
   }
 
@@ -64,25 +69,27 @@ export function normalizeRanges(durationSec: number, raw: unknown): Range[] {
       "endSec" in r ? r.endSec : r.end ?? r.finish,
     );
 
-    if (startSec >= endSec) {
-      throw new Error("各区間では start が end より小さい必要があります。");
-    }
-    if (endSec > durationSec + 1e-6) {
-      throw new Error(
-        `区間が動画長を超えています（end=${endSec} > duration=${durationSec}）。`,
-      );
-    }
-    if (startSec > durationSec + 1e-6) {
-      throw new Error(
-        `区間が動画長を超えています（start=${startSec} > duration=${durationSec}）。`,
-      );
-    }
-
-    out.push({ startSec, endSec: Math.min(endSec, durationSec) });
+    if (startSec >= endSec) throw new Error("各区間では start が end より小さい必要があります。");
+    if (startSec > durationSec + 1e-6) continue;
+    out.push({ startSec: Math.max(0, startSec), endSec: Math.min(endSec, durationSec) });
   }
 
   out.sort((a, b) => a.startSec - b.startSec);
-  return out;
+  const merged: Range[] = [];
+  for (const r of out) {
+    const last = merged[merged.length - 1];
+    if (!last) {
+      merged.push({ ...r });
+      continue;
+    }
+    if (r.startSec <= last.endSec + 1e-9) {
+      last.endSec = Math.max(last.endSec, r.endSec);
+    } else {
+      merged.push({ ...r });
+    }
+  }
+  if (merged.length === 0 && !opts.allowEmpty) throw new Error("有効な区間がありません。");
+  return merged;
 }
 
 /** 削除対象区間から「残す」区間列を算出（昇順マージ済み remove を前提でも再マージします）。 */
