@@ -12,6 +12,8 @@
 ```bash
 npm install
 npm run dev
+npm test           # CI と同様に 1 回実行（vitest run）
+npm run test:watch # 開発時ウォッチ
 ```
 
 ブラウザで `http://localhost:3000` を開きます。
