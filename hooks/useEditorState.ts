@@ -470,6 +470,11 @@ export function useEditorState() {
     setMarkers((prev) => uniqSortedMarkers([...prev, t]));
   }
 
+  function removeMarkerAtTime(timeSec: number) {
+    const EPS = 1e-4;
+    setMarkers((prev) => uniqSortedMarkers(prev.filter((m) => Math.abs(m - timeSec) >= EPS)));
+  }
+
   function toggleSegmentDeleted(id: string) {
     setDeletedSegmentIds((prev) => {
       const next = new Set(prev);
@@ -507,6 +512,7 @@ export function useEditorState() {
     undoLastStep,
     seekPreview,
     addSplitAtCurrentTime,
+    removeMarkerAtTime,
     toggleSegmentDeleted,
     downloadSegmentExport,
     canUndo: appliedSteps.length > 0,

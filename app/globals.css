@@ -230,10 +230,63 @@ video {
   position: absolute;
   top: 0;
   bottom: 0;
+  width: 10px;
+  padding: 0;
+  border: none;
+  transform: translateX(-5px);
+  background: transparent;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.timeline-marker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
   width: 2px;
-  transform: translateX(-1px);
+  transform: translateX(-50%);
   background: rgba(255, 222, 120, 0.95);
-  pointer-events: none;
+  transition: background 0.12s ease, width 0.12s ease;
+}
+
+.timeline-marker:hover:not(:disabled)::before,
+.timeline-marker:focus-visible::before {
+  width: 3px;
+  background: rgba(255, 180, 80, 1);
+}
+
+.timeline-marker:disabled {
+  cursor: default;
+}
+
+.marker-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.marker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #273043;
+  background: #121623;
+}
+
+.marker-row-main {
+  min-width: 0;
+}
+
+.marker-row-title {
+  font-weight: 650;
 }
 
 .timeline-playhead {

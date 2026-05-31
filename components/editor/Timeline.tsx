@@ -10,6 +10,7 @@ export type TimelineProps = {
   deletedSegmentIds: ReadonlySet<string>;
   disabled?: boolean;
   onSeek: (sec: number) => void;
+  onRemoveMarker?: (timeSec: number) => void;
 };
 
 export function Timeline({
@@ -20,6 +21,7 @@ export function Timeline({
   deletedSegmentIds,
   disabled,
   onSeek,
+  onRemoveMarker,
 }: TimelineProps) {
   const safeDur = durationSec > 0 ? durationSec : 1;
 
@@ -94,11 +96,22 @@ export function Timeline({
           })}
 
           {markers.map((m, idx) => (
-            <div
+            <button
               key={`m-${idx}-${m}`}
+              type="button"
               className="timeline-marker"
               style={{ left: `${(m / safeDur) * 100}%` }}
-              title={`split @ ${m.toFixed(3)}s`}
+              title={`分割点 ${m.toFixed(3)}s — クリックで削除`}
+              aria-label={`分割点 ${m.toFixed(3)} 秒を削除`}
+              disabled={disabled || !onRemoveMarker}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (disabled || !onRemoveMarker) return;
+                onRemoveMarker(m);
+              }}
             />
           ))}
 
@@ -111,6 +124,7 @@ export function Timeline({
 
       <p className="muted timeline-hint">
         トラックをクリック／ドラッグでシークできます（キーボード ← → も利用可能）。
+        {onRemoveMarker ? " 黄色の分割点をクリックすると削除できます。" : null}
       </p>
     </div>
   );

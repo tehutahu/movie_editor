@@ -1,6 +1,7 @@
 "use client";
 
 import type { EditorController } from "@/hooks/useEditorState";
+import { MarkerList } from "@/components/editor/MarkerList";
 import { SegmentList } from "@/components/editor/SegmentList";
 import { Timeline } from "@/components/editor/Timeline";
 import { VideoPreview } from "@/components/editor/VideoPreview";
@@ -61,6 +62,7 @@ export function EditorLayout({ editor }: { editor: EditorController }) {
               deletedSegmentIds={editor.deletedSegmentIds}
               disabled={disabled}
               onSeek={(sec) => editor.seekPreview(sec)}
+              onRemoveMarker={(t) => editor.removeMarkerAtTime(t)}
             />
           ) : null}
         </section>
@@ -92,7 +94,9 @@ export function EditorLayout({ editor }: { editor: EditorController }) {
 
           <section className="panel">
             <h2>分割</h2>
-            <p className="muted">再生ヘッド位置に分割点を追加します（論理セグメントのみ作成）。</p>
+            <p className="muted">
+              再生ヘッド位置に分割点を追加します（論理セグメントのみ作成）。分割点を削除すると隣接セグメントが統合されます。
+            </p>
             <button
               type="button"
               className="secondary"
@@ -101,6 +105,11 @@ export function EditorLayout({ editor }: { editor: EditorController }) {
             >
               現在位置に分割点を追加
             </button>
+            <MarkerList
+              markers={editor.markers}
+              disabled={disabled}
+              onRemoveMarker={(t) => editor.removeMarkerAtTime(t)}
+            />
           </section>
 
           <section className="panel">
