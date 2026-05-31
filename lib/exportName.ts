@@ -1,6 +1,18 @@
 const DEFAULT_BASE = "video";
 const MAX_BASE_LEN = 180;
 
+function isAsciiControlChar(code: number): boolean {
+  return code <= 0x1f;
+}
+
+function stripAsciiControlChars(value: string): string {
+  let out = "";
+  for (const ch of value) {
+    if (!isAsciiControlChar(ch.charCodeAt(0))) out += ch;
+  }
+  return out;
+}
+
 /** アップロード元ファイル名から拡張子を除いた表示名を得ます。 */
 function basename(filename: string): string {
   const normalized = filename.replace(/\\/g, "/");
@@ -20,9 +32,8 @@ export function displayNameFromOriginalFilename(filename: string): string {
 export function sanitizeExportBaseName(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return DEFAULT_BASE;
-  const cleaned = trimmed
+  const cleaned = stripAsciiControlChars(trimmed)
     .replace(/[/\\:*?"<>|]/g, "_")
-    .replace(/[\r\n\x00-\x1f]/g, "")
     .replace(/\s+/g, " ")
     .slice(0, MAX_BASE_LEN);
   return cleaned || DEFAULT_BASE;
@@ -35,7 +46,7 @@ export function parseDownloadFilenameParam(raw: string | null): string | null {
   if (!trimmed) return null;
   const base = basename(trimmed);
   if (!base || base === "." || base === "..") return null;
-  if (/[\r\n\x00-\x1f]/.test(base)) return null;
+  if ([...base].some((ch) => isAsciiControlChar(ch.charCodeAt(0)))) return null;
   if (base.length > 255) return null;
   return base;
 }
