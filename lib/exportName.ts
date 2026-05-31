@@ -40,7 +40,10 @@ export function sanitizeExportBaseName(raw: string): string {
 }
 
 /** クエリ等で受け取ったダウンロードファイル名を検証します。 */
-export function parseDownloadFilenameParam(raw: string | null): string | null {
+export function parseDownloadFilenameParam(
+  raw: string | null,
+  requiredExt?: string,
+): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
@@ -48,6 +51,12 @@ export function parseDownloadFilenameParam(raw: string | null): string | null {
   if (!base || base === "." || base === "..") return null;
   if ([...base].some((ch) => isAsciiControlChar(ch.charCodeAt(0)))) return null;
   if (base.length > 255) return null;
+  if (requiredExt) {
+    const normalizedRequiredExt = requiredExt.replace(/^\./, "").toLowerCase();
+    const dot = base.lastIndexOf(".");
+    const actualExt = dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
+    if (!normalizedRequiredExt || actualExt !== normalizedRequiredExt) return null;
+  }
   return base;
 }
 

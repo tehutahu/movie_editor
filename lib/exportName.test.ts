@@ -42,4 +42,11 @@ describe("parseDownloadFilenameParam", () => {
     expect(parseDownloadFilenameParam("/etc/passwd")).toBe("passwd");
     expect(parseDownloadFilenameParam("")).toBeNull();
   });
+
+  it("指定拡張子以外は拒否", () => {
+    expect(parseDownloadFilenameParam("foo.mp4", "mp4")).toBe("foo.mp4");
+    expect(parseDownloadFilenameParam("foo.MP4", ".mp4")).toBe("foo.MP4");
+    expect(parseDownloadFilenameParam("invoice.bat", "mp4")).toBeNull();
+    expect(parseDownloadFilenameParam("foo", "mp4")).toBeNull();
+  });
 });

@@ -23,11 +23,14 @@ function resolveUploadDownloadName(
   inputPath: string,
 ): Promise<string> {
   const url = new URL(req.url);
-  const override = parseDownloadFilenameParam(url.searchParams.get("downloadName"));
+  const ext = path.extname(inputPath).replace(/^\./, "") || "mp4";
+  const override = parseDownloadFilenameParam(
+    url.searchParams.get("downloadName"),
+    ext,
+  );
   if (override) return Promise.resolve(override);
 
   return readUploadDisplayName(videoId).then((stored) => {
-    const ext = path.extname(inputPath).replace(/^\./, "") || "mp4";
     const base = sanitizeExportBaseName(stored ?? "video");
     return buildDownloadFilename(base, "", ext);
   });
