@@ -10,10 +10,16 @@ vi.mock("@/lib/storage", () => ({
   newVideoId: vi.fn(() => "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
   pruneUploadsAfterSave: vi.fn(async () => undefined),
   saveUploadedVideo: vi.fn(async () => undefined),
+  saveUploadDisplayName: vi.fn(async () => undefined),
 }));
 
 import { POST } from "./route";
-import { ensureStorageTrees, newVideoId, saveUploadedVideo } from "@/lib/storage";
+import {
+  ensureStorageTrees,
+  newVideoId,
+  saveUploadDisplayName,
+  saveUploadedVideo,
+} from "@/lib/storage";
 import { parseAllowedVideoExtension } from "@/lib/validation";
 
 describe("POST /api/videos", () => {
@@ -80,6 +86,11 @@ describe("POST /api/videos", () => {
     const json = await res.json();
     expect(json.videoId).toBe("b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22");
     expect(json.ext).toBe("mp4");
+    expect(json.displayName).toBe("a");
+    expect(saveUploadDisplayName).toHaveBeenCalledWith(
+      "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22",
+      "a",
+    );
 
     vi.mocked(newVideoId).mockReturnValue(
       "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",

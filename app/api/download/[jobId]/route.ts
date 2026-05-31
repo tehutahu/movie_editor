@@ -1,3 +1,4 @@
+import { parseDownloadFilenameParam } from "@/lib/exportName";
 import { getJobRecord } from "@/lib/jobs";
 import { buildFileStreamResponse } from "@/lib/fileStream";
 import { assertJobOutputFile } from "@/lib/pathGuard";
@@ -38,7 +39,9 @@ export async function GET(
     assertJobOutputFile(jobId, job.outputPath);
     const res = await buildFileStreamResponse(job.outputPath, req);
 
-    const name = job.downloadName ?? "output.mp4";
+    const url = new URL(req.url);
+    const override = parseDownloadFilenameParam(url.searchParams.get("downloadName"));
+    const name = override ?? job.downloadName ?? "output.mp4";
     const headers = new Headers(res.headers);
     headers.set("Content-Disposition", contentDispositionAttachment(name));
 

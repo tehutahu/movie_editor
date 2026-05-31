@@ -35,6 +35,17 @@ export function parseAllowedVideoExtension(filename: string): string | null {
   return ext;
 }
 
+/** ジョブ出力ファイル名のベース（クライアント指定、任意）。 */
+export function parseExportBaseName(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "string") {
+    throw new Error("exportBaseName は文字列である必要があります。");
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  return trimmed;
+}
+
 export function assertPositiveNumber(label: string, value: unknown): number {
   const n =
     typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;

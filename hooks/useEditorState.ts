@@ -8,6 +8,11 @@ import {
   useState,
 } from "react";
 import {
+  buildDownloadFilename,
+  displayNameFromOriginalFilename,
+  sanitizeExportBaseName,
+} from "@/lib/exportName";
+import {
   buildSegmentsFromMarkers,
   segmentsToRemoveRanges,
   type Segment,
@@ -143,9 +148,13 @@ export function useEditorState() {
   const [error, setError] = useState<string | null>(null);
 
   const [baseVideoId, setBaseVideoId] = useState<string | null>(null);
+  const [videoDisplayName, setVideoDisplayName] = useState("");
+  const [uploadExt, setUploadExt] = useState("mp4");
   const [currentSource, setCurrentSource] = useState<CurrentSource | null>(null);
   const [appliedSteps, setAppliedSteps] = useState<AppliedStep[]>([]);
   const appliedStepsRef = useRef(appliedSteps);
+  /** 同一 videoId のメタデータ再取得で表示名を上書きしない */
+  const loadedDisplayNameForVideoIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     appliedStepsRef.current = appliedSteps;
@@ -175,13 +184,45 @@ export function useEditorState() {
     return `/api/jobs/${currentSource.jobId}/stream`;
   }, [currentSource]);
 
-  const exportHref = useMemo(() => {
+  const currentDownloadFilename = useMemo(() => {
+    const base = sanitizeExportBaseName(videoDisplayName);
     if (!currentSource) return null;
+
     if (currentSource.type === "upload") {
-      return `/api/videos/${currentSource.videoId}/download`;
+      return buildDownloadFilename(base, "", uploadExt);
     }
-    return `/api/download/${currentSource.jobId}`;
-  }, [currentSource]);
+
+    const last = appliedSteps[appliedSteps.length - 1];
+    if (!last) return buildDownloadFilename(base, "", "mp4");
+    if (last.kind === "restore") {
+      const speed = Number(speedFactor);
+      const sr = Number(sampleRateHz);
+      if (!Number.isFinite(speed) || !Number.isFinite(sr)) {
+        return buildDownloadFilename(base, "restored", "mp4");
+      }
+      return buildDownloadFilename(base, `restored_${speed}x_${sr}hz`, "mp4");
+    }
+    if (last.kind === "merge_kept") {
+      return buildDownloadFilename(base, "merged", "mp4");
+    }
+    return buildDownloadFilename(base, "", "mp4");
+  }, [
+    appliedSteps,
+    currentSource,
+    speedFactor,
+    sampleRateHz,
+    uploadExt,
+    videoDisplayName,
+  ]);
+
+  const exportHref = useMemo(() => {
+    if (!currentSource || !currentDownloadFilename) return null;
+    const q = `downloadName=${encodeURIComponent(currentDownloadFilename)}`;
+    if (currentSource.type === "upload") {
+      return `/api/videos/${currentSource.videoId}/download?${q}`;
+    }
+    return `/api/download/${currentSource.jobId}?${q}`;
+  }, [currentDownloadFilename, currentSource]);
 
   const segments = useMemo((): Segment[] => {
     if (!meta) return [];
@@ -191,9 +232,18 @@ export function useEditorState() {
   const refreshMeta = useCallback(async (src: CurrentSource) => {
     if (src.type === "upload") {
       const res = await fetch(`/api/videos/${src.videoId}/metadata`, { cache: "no-store" });
-      const json = (await res.json()) as PreviewMeta & { error?: string };
+      const json = (await res.json()) as PreviewMeta & {
+        error?: string;
+        displayName?: string;
+      };
       if (!res.ok) throw new Error(json.error ?? "メタデータ取得に失敗しました。");
       setMeta(json);
+      if (loadedDisplayNameForVideoIdRef.current !== src.videoId) {
+        loadedDisplayNameForVideoIdRef.current = src.videoId;
+        if (typeof json.displayName === "string" && json.displayName.trim()) {
+          setVideoDisplayName(json.displayName);
+        }
+      }
       return;
     }
 
@@ -256,6 +306,9 @@ export function useEditorState() {
     appliedStepsRef.current = [];
     setMeta(null);
     setBaseVideoId(null);
+    setVideoDisplayName("");
+    setUploadExt("mp4");
+    loadedDisplayNameForVideoIdRef.current = null;
     setCurrentSource(null);
     if (!file) return;
 
@@ -264,9 +317,23 @@ export function useEditorState() {
       const fd = new FormData();
       fd.set("file", file);
       const res = await fetch("/api/videos", { method: "POST", body: fd });
-      const json = (await res.json()) as { videoId?: string; error?: string };
+      const json = (await res.json()) as {
+        videoId?: string;
+        originalName?: string;
+        displayName?: string;
+        ext?: string;
+        error?: string;
+      };
       if (!res.ok) throw new Error(json.error ?? "アップロードに失敗しました。");
       if (!json.videoId) throw new Error("videoId が返りませんでした。");
+
+      const name =
+        typeof json.displayName === "string" && json.displayName.trim()
+          ? json.displayName
+          : displayNameFromOriginalFilename(file.name);
+      setVideoDisplayName(name);
+      setUploadExt(typeof json.ext === "string" && json.ext ? json.ext : "mp4");
+      loadedDisplayNameForVideoIdRef.current = json.videoId;
 
       setBaseVideoId(json.videoId);
       const src: CurrentSource = { type: "upload", videoId: json.videoId };
@@ -318,6 +385,7 @@ export function useEditorState() {
           sourceJobId: sourceJobIdForJobChain,
           speedFactor: Number(speedFactor),
           sampleRateHz: Number(sampleRateHz),
+          exportBaseName: sanitizeExportBaseName(videoDisplayName),
         }),
       });
       const json = (await res.json()) as { jobId?: string; error?: string };
@@ -359,6 +427,7 @@ export function useEditorState() {
           sourceJobId: sourceJobIdForJobChain,
           startSec: segment.startSec,
           endSec: segment.endSec,
+          exportBaseName: sanitizeExportBaseName(videoDisplayName),
         }),
       });
       const json = (await res.json()) as { jobId?: string; error?: string };
@@ -376,8 +445,13 @@ export function useEditorState() {
 
       await requestStoragePrune(collectKeepIds(baseVideoId, appliedStepsRef.current));
 
+      const segmentFilename = buildDownloadFilename(
+        sanitizeExportBaseName(videoDisplayName),
+        `segment_${segment.startSec}-${segment.endSec}`,
+        "mp4",
+      );
       const a = document.createElement("a");
-      a.href = `/api/download/${json.jobId}`;
+      a.href = `/api/download/${json.jobId}?downloadName=${encodeURIComponent(segmentFilename)}`;
       a.rel = "noreferrer";
       document.body.appendChild(a);
       a.click();
@@ -414,6 +488,7 @@ export function useEditorState() {
           videoId: baseVideoId,
           sourceJobId: sourceJobIdForJobChain,
           removeRanges,
+          exportBaseName: sanitizeExportBaseName(videoDisplayName),
         }),
       });
       const json = (await res.json()) as { jobId?: string; error?: string };
@@ -489,6 +564,9 @@ export function useEditorState() {
     busy,
     error,
     baseVideoId,
+    videoDisplayName,
+    setVideoDisplayName,
+    currentDownloadFilename,
     currentSource,
     appliedSteps,
     meta,
