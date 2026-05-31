@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { displayNameFromOriginalFilename } from "@/lib/exportName";
 import {
   ensureStorageTrees,
   newVideoId,
   pruneUploadsAfterSave,
+  saveUploadDisplayName,
   saveUploadedVideo,
 } from "@/lib/storage";
 import {
@@ -47,9 +49,11 @@ export async function POST(req: Request) {
     const buf = new Uint8Array(await file.arrayBuffer());
     const videoId = newVideoId();
     await saveUploadedVideo({ videoId, ext, bytes: buf });
+    const displayName = displayNameFromOriginalFilename(file.name);
+    await saveUploadDisplayName(videoId, displayName);
     await pruneUploadsAfterSave(videoId);
 
-    return NextResponse.json({ videoId, originalName: file.name, ext });
+    return NextResponse.json({ videoId, originalName: file.name, displayName, ext });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },

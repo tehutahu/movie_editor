@@ -16,10 +16,12 @@ import {
 import { resolveInputPath } from "@/lib/mediaSource";
 import { assertJobOutputFile } from "@/lib/pathGuard";
 import { ensureJobDir, pruneJobsAfterComplete } from "@/lib/storage";
+import { buildDownloadFilename, sanitizeExportBaseName } from "@/lib/exportName";
 import {
   assertStorageId,
   keptRangesAfterRemovals,
   normalizeRanges,
+  parseExportBaseName,
 } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -30,6 +32,7 @@ type Body = {
   sourceJobId?: string;
   /** 動画から「削除」する区間（秒）。残りを結合します。 */
   removeRanges?: unknown;
+  exportBaseName?: string;
 };
 
 async function unlinkPartExtractions(jobDirAbs: string): Promise<void> {
@@ -79,8 +82,14 @@ export async function POST(req: Request) {
     const remove = normalizeRanges(meta.durationSec, body.removeRanges);
     const kept = keptRangesAfterRemovals(meta.durationSec, remove);
 
+    const exportBase = sanitizeExportBaseName(
+      parseExportBaseName(body.exportBaseName) ?? "video",
+    );
     const job = createJobRecord("merge_kept");
-    patchJobRecord(job.id, { downloadName: "merged_removed_gaps.mp4", currentStep: "segment" });
+    patchJobRecord(job.id, {
+      downloadName: buildDownloadFilename(exportBase, "merged", "mp4"),
+      currentStep: "segment",
+    });
 
     runDetached(job.id, async () => {
       const jobDirAbs = await ensureJobDir(job.id);

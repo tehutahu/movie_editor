@@ -28,6 +28,25 @@ export function EditorLayout({ editor }: { editor: EditorController }) {
 
       <div className="editor-shell">
         <section className="editor-main panel">
+          {editor.hasUpload ? (
+            <div className="editor-video-name">
+              <label htmlFor="video-display-name">動画名（出力ファイル名のベース）</label>
+              <input
+                id="video-display-name"
+                type="text"
+                value={editor.videoDisplayName}
+                disabled={Boolean(editor.busy) || Boolean(editor.segmentExportBusySegmentId)}
+                placeholder="例: my-recording"
+                onChange={(e) => editor.setVideoDisplayName(e.target.value)}
+              />
+              {editor.currentDownloadFilename ? (
+                <p className="muted editor-video-name-hint">
+                  出力例: <code>{editor.currentDownloadFilename}</code>
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           <VideoPreview
             ref={editor.videoRef}
             src={editor.previewSrc}

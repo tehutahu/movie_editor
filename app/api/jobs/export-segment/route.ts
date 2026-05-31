@@ -9,7 +9,12 @@ import {
 import { assertJobOutputFile } from "@/lib/pathGuard";
 import { resolveInputPath } from "@/lib/mediaSource";
 import { ensureJobDir, pruneJobsAfterComplete } from "@/lib/storage";
-import { assertStorageId, normalizeRanges } from "@/lib/validation";
+import { buildDownloadFilename, sanitizeExportBaseName } from "@/lib/exportName";
+import {
+  assertStorageId,
+  normalizeRanges,
+  parseExportBaseName,
+} from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -18,6 +23,7 @@ type Body = {
   sourceJobId?: string;
   startSec?: number;
   endSec?: number;
+  exportBaseName?: string;
 };
 
 /** 指定区間を単体ファイルとして書き出します。 */
@@ -55,9 +61,16 @@ export async function POST(req: Request) {
       { startSec: body.startSec, endSec: body.endSec },
     ]);
 
+    const exportBase = sanitizeExportBaseName(
+      parseExportBaseName(body.exportBaseName) ?? "video",
+    );
     const job = createJobRecord("export_segment");
     patchJobRecord(job.id, {
-      downloadName: `segment_${range.startSec}-${range.endSec}.mp4`,
+      downloadName: buildDownloadFilename(
+        exportBase,
+        `segment_${range.startSec}-${range.endSec}`,
+        "mp4",
+      ),
       currentStep: "segment",
     });
 

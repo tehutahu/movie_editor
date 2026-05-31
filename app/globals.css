@@ -67,6 +67,19 @@ label {
   font-size: 0.9rem;
 }
 
+.editor-video-name {
+  margin-bottom: 12px;
+}
+
+.editor-video-name label {
+  margin-top: 0;
+}
+
+.editor-video-name-hint {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+}
+
 input[type="file"],
 input[type="number"],
 input[type="text"] {

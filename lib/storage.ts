@@ -1,9 +1,10 @@
-import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { UPLOADS_ROOT, JOBS_ROOT } from "@/lib/paths";
 import { assertInsideDir } from "@/lib/pathGuard";
 import { assertStorageId } from "@/lib/validation";
+import { sanitizeExportBaseName } from "@/lib/exportName";
 import { pruneJobsStorage, pruneUploadStorage } from "@/lib/storageRetention";
 
 export async function ensureStorageTrees(): Promise<void> {
@@ -44,6 +45,32 @@ export async function saveUploadedVideo(input: {
   const inputPath = path.join(dir, `input.${input.ext}`);
   await atomicWriteTmpThenRename(inputPath, input.bytes);
   return { inputPath };
+}
+
+const DISPLAY_NAME_FILE = "displayName.txt";
+
+export async function saveUploadDisplayName(
+  videoId: string,
+  displayName: string,
+): Promise<void> {
+  const dir = uploadVideoDir(videoId);
+  await mkdir(dir, { recursive: true });
+  const abs = path.join(dir, DISPLAY_NAME_FILE);
+  assertInsideDir(dir, abs);
+  await writeFile(abs, sanitizeExportBaseName(displayName), "utf8");
+}
+
+export async function readUploadDisplayName(videoId: string): Promise<string | null> {
+  const dir = uploadVideoDir(videoId);
+  const abs = path.join(dir, DISPLAY_NAME_FILE);
+  assertInsideDir(dir, abs);
+  try {
+    const raw = await readFile(abs, "utf8");
+    const trimmed = raw.trim();
+    return trimmed || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function findUploadInputPath(videoId: string): Promise<string | null> {

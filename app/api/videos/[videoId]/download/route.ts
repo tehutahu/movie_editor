@@ -1,6 +1,12 @@
+import path from "node:path";
 import { NextResponse } from "next/server";
+import {
+  buildDownloadFilename,
+  parseDownloadFilenameParam,
+  sanitizeExportBaseName,
+} from "@/lib/exportName";
 import { buildFileStreamResponse } from "@/lib/fileStream";
-import { findUploadInputPath } from "@/lib/storage";
+import { findUploadInputPath, readUploadDisplayName } from "@/lib/storage";
 import { assertUploadFileBelongsToVideo } from "@/lib/pathGuard";
 import { assertStorageId } from "@/lib/validation";
 
@@ -9,6 +15,25 @@ export const runtime = "nodejs";
 function contentDispositionAttachment(name: string): string {
   const safeAscii = name.replace(/[\r\n"]/g, "_");
   return `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+function resolveUploadDownloadName(
+  req: Request,
+  videoId: string,
+  inputPath: string,
+): Promise<string> {
+  const url = new URL(req.url);
+  const ext = path.extname(inputPath).replace(/^\./, "") || "mp4";
+  const override = parseDownloadFilenameParam(
+    url.searchParams.get("downloadName"),
+    ext,
+  );
+  if (override) return Promise.resolve(override);
+
+  return readUploadDisplayName(videoId).then((stored) => {
+    const base = sanitizeExportBaseName(stored ?? "video");
+    return buildDownloadFilename(base, "", ext);
+  });
 }
 
 /** アップロード済みオリジナル動画を添付ダウンロードします（未編集エクスポート用）。 */
@@ -26,9 +51,9 @@ export async function GET(
     assertUploadFileBelongsToVideo(videoId, inputPath);
 
     const res = await buildFileStreamResponse(inputPath, req);
-    const base = inputPath.split(/[/\\]/).pop() ?? "upload.mp4";
+    const downloadName = await resolveUploadDownloadName(req, videoId, inputPath);
     const headers = new Headers(res.headers);
-    headers.set("Content-Disposition", contentDispositionAttachment(base));
+    headers.set("Content-Disposition", contentDispositionAttachment(downloadName));
 
     return new Response(res.body, { status: res.status, headers });
   } catch (e) {

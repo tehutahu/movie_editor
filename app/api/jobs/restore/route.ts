@@ -9,10 +9,12 @@ import {
 import { assertJobOutputFile } from "@/lib/pathGuard";
 import { resolveInputPath } from "@/lib/mediaSource";
 import { ensureJobDir, pruneJobsAfterComplete } from "@/lib/storage";
+import { buildDownloadFilename, sanitizeExportBaseName } from "@/lib/exportName";
 import {
   assertPositiveInt,
   assertPositiveNumber,
   assertStorageId,
+  parseExportBaseName,
 } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -23,6 +25,8 @@ type Body = {
   sourceJobId?: string;
   speedFactor?: number;
   sampleRateHz?: number;
+  /** 出力ファイル名のベース（任意）。 */
+  exportBaseName?: string;
 };
 
 /** `restore_speed.sh` 相当フィルタで速度・音程を戻します。 */
@@ -58,9 +62,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: msg }, { status });
     }
 
+    const exportBase = sanitizeExportBaseName(
+      parseExportBaseName(body.exportBaseName) ?? "video",
+    );
     const job = createJobRecord("restore");
     patchJobRecord(job.id, {
-      downloadName: `restored_${speedFactor}x_${sampleRateHz}hz.mp4`,
+      downloadName: buildDownloadFilename(
+        exportBase,
+        `restored_${speedFactor}x_${sampleRateHz}hz`,
+        "mp4",
+      ),
       currentStep: "restore",
     });
 

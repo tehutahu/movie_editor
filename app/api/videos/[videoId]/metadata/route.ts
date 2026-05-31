@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { assertFfmpegAvailable, probeVideo } from "@/lib/ffmpeg";
-import { findUploadInputPath } from "@/lib/storage";
+import { findUploadInputPath, readUploadDisplayName } from "@/lib/storage";
 import { assertUploadFileBelongsToVideo } from "@/lib/pathGuard";
 import { assertStorageId } from "@/lib/validation";
 
@@ -21,8 +21,10 @@ export async function GET(
     assertUploadFileBelongsToVideo(videoId, inputPath);
 
     const info = await probeVideo(inputPath);
+    const displayName = await readUploadDisplayName(videoId);
     return NextResponse.json({
       videoId,
+      displayName: displayName ?? undefined,
       durationSec: info.durationSec,
       width: info.width,
       height: info.height,
