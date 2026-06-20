@@ -16,7 +16,7 @@ import {
   buildSegmentsFromMarkers,
   segmentsToRemoveRanges,
   type Segment,
-} from "@/lib/segments";
+} from "@/lib/legacy/segments";
 
 export type PreviewMeta = {
   durationSec: number;

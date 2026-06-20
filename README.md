@@ -2,7 +2,7 @@
 
 ブラウザ上で動くマルチトラック動画エディタです。素材のアップロード、タイムライン編集（分割・結合・Undo/Redo）、Canvas 合成プレビュー、ffmpeg による書き出しまでを単一の Next.js プロセスで行います。
 
-[`restore_speed.sh`](restore_speed.sh) と同等の ffmpeg フィルタで「倍速っぽい動画」を元の速度・音程へ戻す機能も含みます。
+[`scripts/restore_speed.sh`](scripts/restore_speed.sh) と同等の ffmpeg フィルタで「倍速っぽい動画」を元の速度・音程へ戻す機能も含みます。
 
 ## 主な機能
 
@@ -25,7 +25,7 @@
 
 ### ジョブ・書き出し
 
-- **速度復元** — 選択した動画クリップに `restore_speed.sh` 相当の ffmpeg 処理を適用
+- **速度復元** — 選択した動画クリップに `scripts/restore_speed.sh` 相当の ffmpeg 処理を適用
 - **選択クリップ書き出し** — タイムライン上の区間を mp4 でダウンロード
 - **全体書き出し** — タイムライン合成を 1920×1080 mp4 でエクスポート
 - **Undo / Redo** — 編集操作の取り消し（Ctrl+Z / Shift+Ctrl+Z）
@@ -172,4 +172,4 @@ CI では ffmpeg をインストールせず、Vitest は API をモックで検
 
 ## 既存スクリプト
 
-- [`restore_speed.sh`](restore_speed.sh) — 速度復元の元になったシェルスクリプト
+- [`scripts/restore_speed.sh`](scripts/restore_speed.sh) — 速度復元の元になったシェルスクリプト

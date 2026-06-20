@@ -1,6 +1,6 @@
 "use client";
 
-import type { Segment } from "@/lib/segments";
+import type { Segment } from "@/lib/legacy/segments";
 
 export type SegmentListProps = {
   segments: readonly Segment[];

@@ -4,7 +4,7 @@ import {
   buildSegmentsFromMarkers,
   segmentsToRemoveRanges,
   type Segment,
-} from "@/lib/segments";
+} from "@/lib/legacy/segments";
 
 describe("buildSegmentsFromMarkers", () => {
   it("マーカーが無ければ単一セグメント 0〜duration にする", () => {

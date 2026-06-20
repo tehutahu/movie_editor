@@ -41,12 +41,15 @@ components/editor/
   AssetLibraryPanel.tsx   → uploads + asset grid
   CompositorPreview.tsx   → Canvas preview + transform handles
   MultiTrackTimeline.tsx  → toolbar + track rows + clip drag
-  EditorLayout.tsx        → legacy single-video UI (unused)
+  legacy/                 → single-video segment editor UI (unused)
 hooks/
   useEditorStore.ts       → NLE state, jobs, keyboard shortcuts
-  useEditorState.ts       → legacy segment editor (unused)
+  legacy/useEditorState.ts → legacy segment editor (unused)
 lib/editor/               → project model, clip ops, compositor, commands
+lib/storage/              → media storage driver + local filesystem helpers
+lib/legacy/               → segment model for legacy editor
 lib/exportComposition.ts  → ffmpeg composition export pipeline
+scripts/restore_speed.sh  → reference CLI for speed restore filter
 app/api/assets/*          → primary upload/stream/metadata/filmstrip
 app/api/jobs/*            → restore, export, merge-kept, polling
 app/api/videos/*          → legacy upload/stream (compat)
