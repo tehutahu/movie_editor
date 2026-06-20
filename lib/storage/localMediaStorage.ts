@@ -1,11 +1,11 @@
 import {
+  atomicWriteTmpThenRename,
   findUploadInputPath,
   readUploadDisplayName,
   saveUploadDisplayName,
   saveUploadedVideo,
   uploadVideoDir,
-} from "@/lib/storage";
-import { atomicWriteTmpThenRename } from "@/lib/storage";
+} from "@/lib/storage/localFs";
 import { mkdir, access } from "node:fs/promises";
 import path from "node:path";
 import type { AssetKind } from "@/lib/editor/types";

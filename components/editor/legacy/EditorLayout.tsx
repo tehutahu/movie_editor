@@ -1,10 +1,10 @@
 "use client";
 
-import type { EditorController } from "@/hooks/useEditorState";
-import { MarkerList } from "@/components/editor/MarkerList";
-import { SegmentList } from "@/components/editor/SegmentList";
-import { Timeline } from "@/components/editor/Timeline";
-import { VideoPreview } from "@/components/editor/VideoPreview";
+import type { EditorController } from "@/hooks/legacy/useEditorState";
+import { MarkerList } from "@/components/editor/legacy/MarkerList";
+import { SegmentList } from "@/components/editor/legacy/SegmentList";
+import { Timeline } from "@/components/editor/legacy/Timeline";
+import { VideoPreview } from "@/components/editor/legacy/VideoPreview";
 
 export function EditorLayout({ editor }: { editor: EditorController }) {
   const disabled =

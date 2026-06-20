@@ -2,6 +2,8 @@ import type { MediaStorage } from "@/lib/storage/mediaStorage";
 import { createLocalMediaStorage } from "@/lib/storage/localMediaStorage";
 import { createBlobMediaStorage } from "@/lib/storage/blobMediaStorage";
 
+export * from "@/lib/storage/localFs";
+
 let cached: MediaStorage | null = null;
 
 export function getMediaStorage(): MediaStorage {

@@ -107,5 +107,3 @@ export async function pruneUploadsAfterSave(videoId: string): Promise<void> {
 export async function pruneJobsAfterComplete(jobId: string): Promise<void> {
   await pruneJobsStorage([jobId]);
 }
-
-export { getMediaStorage } from "@/lib/storage/index";
