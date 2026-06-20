@@ -4,9 +4,53 @@
 
 Local MVP web video editor (`movie-editor`). Next.js 16 (App Router) + React 19. Upload, ffmpeg jobs, and multi-track timeline editing run in a single Next.js process on port 3000.
 
-Features include: asset library (video + image upload), multi-track timeline (drag/drop, split, merge, delete, undo/redo), Canvas compositor preview, speed restore (equivalent to `restore_speed.sh`), segment export, and full composition export.
+The **primary UI** is the multi-track NLE (`EditorShell` + `useEditorStore`). A legacy single-video segment editor (`EditorLayout` + `useEditorState`) remains in the repo for reference and API compatibility but is **not mounted** from `app/page.tsx`.
 
 See [README.md](README.md) for user-facing setup and usage.
+
+## Implemented features (current branch)
+
+| Area | Capabilities |
+|------|----------------|
+| Asset library | Multi-file upload (video + image), drag to timeline |
+| Timeline | Multi-track, drag/move, edge resize, split/merge/delete/duplicate, overlap resolution, zoom, filmstrip thumbnails (video) |
+| Preview | Canvas compositor (position/scale), playback controls, frame step, fullscreen, audio from top video track |
+| Editing | Undo/redo command history, resizable preview/timeline split (persisted in `localStorage`) |
+| Jobs | Speed restore, per-clip segment export, full composition export (1920×1080 mp4) |
+| Storage | Local filesystem (default) or Vercel Blob |
+
+## Not implemented (documented gaps)
+
+Do not assume these exist when testing or extending the app:
+
+- **Project persistence** — timeline state lives in memory; refresh clears edits (except split-pane height).
+- **merge-kept UI** — `POST /api/jobs/merge-kept` works but is only wired in the legacy editor, not the NLE.
+- **Track management** — add track only; no delete, reorder, mute, solo, or lock.
+- **Asset management** — no delete/rename in the NLE asset panel.
+- **Advanced editing** — no transitions, effects, text overlays, opacity, volume per clip, ripple/roll trim, copy/paste, or playhead/grid snapping (overlap snap on move only).
+- **Export options** — mp4 only; no custom resolution/frame-rate picker in UI.
+- **Auth / collaboration / cloud project files** — local single-user MVP.
+- **CI browser E2E** — Vitest unit tests only; ffmpeg not installed in CI.
+
+## Codebase map
+
+```
+app/page.tsx              → useEditorStore + EditorShell (primary entry)
+components/editor/
+  EditorShell.tsx         → layout shell, resizable split
+  AssetLibraryPanel.tsx   → uploads + asset grid
+  CompositorPreview.tsx   → Canvas preview + transform handles
+  MultiTrackTimeline.tsx  → toolbar + track rows + clip drag
+  EditorLayout.tsx        → legacy single-video UI (unused)
+hooks/
+  useEditorStore.ts       → NLE state, jobs, keyboard shortcuts
+  useEditorState.ts       → legacy segment editor (unused)
+lib/editor/               → project model, clip ops, compositor, commands
+lib/exportComposition.ts  → ffmpeg composition export pipeline
+app/api/assets/*          → primary upload/stream/metadata/filmstrip
+app/api/jobs/*            → restore, export, merge-kept, polling
+app/api/videos/*          → legacy upload/stream (compat)
+```
 
 ## Common commands
 
@@ -79,8 +123,8 @@ When validating UI changes or end-to-end behavior, **always use the browser skil
 
 1. Start the dev server if it is not already running: `npm run dev`
 2. Navigate to `http://127.0.0.1:3000` with `browser_navigate`
-3. Take a `browser_snapshot` to confirm the page structure (header, asset panel, timeline, preview)
-4. Interact with the editor as needed (upload, drag clips, toolbar actions)
+3. Take a `browser_snapshot` to confirm: header (“マルチトラック動画エディタ”), asset panel, compositor preview, multi-track timeline toolbar
+4. Interact with the editor (upload, drag clip to track, split, preview play, export)
 5. Capture `browser_take_screenshot` to visually confirm the result before reporting success
 
 Use `browser_lock` / `browser_unlock` around multi-step browser automation. Prefer snapshot and screenshot evidence over assumptions about UI state.
@@ -90,3 +134,4 @@ Use `browser_lock` / `browser_unlock` around multi-step browser automation. Pref
 - `storage/` is created at runtime and gitignored; a clean clone starts empty.
 - pre-commit / husky are not configured (sample hooks only).
 - Legacy `/api/videos/*` routes remain for compatibility; prefer `/api/assets` for new work.
+- Filmstrip thumbnails are generated for **video** assets only; image clips show a solid background on the timeline.
