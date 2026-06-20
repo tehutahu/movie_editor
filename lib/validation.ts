@@ -29,10 +29,31 @@ export const ALLOWED_VIDEO_EXT = new Set([
   "wmv",
 ]);
 
+export const ALLOWED_IMAGE_EXT = new Set(["png", "jpg", "jpeg", "webp", "gif"]);
+
+export const ALLOWED_ASSET_EXT = new Set([...ALLOWED_VIDEO_EXT, ...ALLOWED_IMAGE_EXT]);
+
 export function parseAllowedVideoExtension(filename: string): string | null {
   const ext = filename.split(".").pop()?.toLowerCase();
   if (!ext || !ALLOWED_VIDEO_EXT.has(ext)) return null;
   return ext;
+}
+
+export function parseAllowedImageExtension(filename: string): string | null {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  if (!ext || !ALLOWED_IMAGE_EXT.has(ext)) return null;
+  return ext;
+}
+
+export function parseAllowedAssetExtension(filename: string): {
+  ext: string;
+  kind: "video" | "image";
+} | null {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  if (!ext) return null;
+  if (ALLOWED_VIDEO_EXT.has(ext)) return { ext, kind: "video" };
+  if (ALLOWED_IMAGE_EXT.has(ext)) return { ext, kind: "image" };
+  return null;
 }
 
 /** ジョブ出力ファイル名のベース（クライアント指定、任意）。 */
