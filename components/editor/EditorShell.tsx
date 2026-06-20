@@ -4,9 +4,93 @@ import type { EditorStore } from "@/hooks/useEditorStore";
 import { AssetLibraryPanel } from "@/components/editor/AssetLibraryPanel";
 import { CompositorPreview } from "@/components/editor/CompositorPreview";
 import { MultiTrackTimeline } from "@/components/editor/MultiTrackTimeline";
+import { timelineTracksAreaHeightPx } from "@/lib/editor/timelineLayout";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const SPLIT_STORAGE_KEY = "editor-workspace-height-px";
+const SPLIT_HANDLE_HEIGHT_PX = 12;
+const MIN_WORKSPACE_PX = 220;
+const MIN_TIMELINE_TOOLBAR_PX = 52;
+const TIMELINE_PANEL_PADDING_PX = 32;
+
+function timelinePaneHeightPx(trackCount: number): number {
+  return MIN_TIMELINE_TOOLBAR_PX + TIMELINE_PANEL_PADDING_PX + timelineTracksAreaHeightPx(trackCount);
+}
+
+function readStoredWorkspaceHeight(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(SPLIT_STORAGE_KEY);
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 export function EditorShell({ editor }: { editor: EditorStore }) {
-  const { project, setExportBaseName, busy, error, liveJob, jobPhase, speedFactor, setSpeedFactor, sampleRateHz, setSampleRateHz } = editor;
+  const { project, setExportBaseName, busy, error, liveJob, jobPhase } = editor;
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const [workspaceHeightPx, setWorkspaceHeightPx] = useState<number | null>(null);
+  const workspaceHeightRef = useRef<number | null>(null);
+  workspaceHeightRef.current = workspaceHeightPx;
+
+  const timelineHeightPx = timelinePaneHeightPx(project.tracks.length);
+
+  const clampWorkspaceHeight = useCallback(
+    (raw: number, shellHeight: number) => {
+      const maxTop = shellHeight - SPLIT_HANDLE_HEIGHT_PX - timelineHeightPx;
+      return Math.min(maxTop, Math.max(MIN_WORKSPACE_PX, raw));
+    },
+    [timelineHeightPx],
+  );
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+
+    const syncHeights = () => {
+      const shellH = shell.getBoundingClientRect().height;
+      const stored = readStoredWorkspaceHeight();
+      const fallback = clampWorkspaceHeight(shellH * 0.55, shellH);
+      setWorkspaceHeightPx((prev) => {
+        const base = prev ?? stored ?? fallback;
+        return clampWorkspaceHeight(base, shellH);
+      });
+    };
+
+    syncHeights();
+    const ro = new ResizeObserver(syncHeights);
+    ro.observe(shell);
+    return () => ro.disconnect();
+  }, [clampWorkspaceHeight, timelineHeightPx]);
+
+  const onSplitPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const shell = shellRef.current;
+      if (!shell) return;
+
+      const shellRect = shell.getBoundingClientRect();
+      const startY = e.clientY;
+      const startHeight = workspaceHeightRef.current ?? shellRect.height * 0.55;
+
+      const onMove = (ev: PointerEvent) => {
+        const dy = ev.clientY - startY;
+        const next = clampWorkspaceHeight(startHeight + dy, shellRect.height);
+        setWorkspaceHeightPx(next);
+      };
+
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        if (workspaceHeightRef.current !== null) {
+          window.localStorage.setItem(SPLIT_STORAGE_KEY, String(workspaceHeightRef.current));
+        }
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [clampWorkspaceHeight],
+  );
 
   return (
     <>
@@ -29,47 +113,44 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
         </p>
       ) : null}
 
-      <div className="editor-shell-v2">
-        <div className="editor-top-row">
-          <AssetLibraryPanel editor={editor} />
-          <div className="editor-center-col">
-            <div className="editor-project-name">
-              <label htmlFor="export-base-name">プロジェクト名</label>
-              <input
-                id="export-base-name"
-                type="text"
-                value={project.exportBaseName}
-                disabled={Boolean(busy)}
-                onChange={(e) => setExportBaseName(e.target.value)}
-              />
+      <div className="editor-shell-v2" ref={shellRef}>
+        <div
+          className="editor-workspace-pane"
+          style={{
+            height: workspaceHeightPx ?? undefined,
+            minHeight: MIN_WORKSPACE_PX,
+            flexShrink: 0,
+          }}
+        >
+          <div className="editor-top-row">
+            <AssetLibraryPanel editor={editor} />
+            <div className="editor-center-col">
+              <div className="editor-project-name">
+                <label htmlFor="export-base-name">プロジェクト名</label>
+                <input
+                  id="export-base-name"
+                  type="text"
+                  value={project.exportBaseName}
+                  disabled={Boolean(busy)}
+                  onChange={(e) => setExportBaseName(e.target.value)}
+                />
+              </div>
+              <CompositorPreview editor={editor} />
             </div>
-            <CompositorPreview editor={editor} />
           </div>
-          <aside className="tool-rail panel">
-            <h2>ツール</h2>
-            <label htmlFor="speed-factor">速度係数</label>
-            <input
-              id="speed-factor"
-              type="number"
-              min={0.1}
-              step={0.1}
-              value={speedFactor}
-              onChange={(e) => setSpeedFactor(e.target.value)}
-            />
-            <label htmlFor="sample-rate">サンプルレート (Hz)</label>
-            <input
-              id="sample-rate"
-              type="number"
-              step={1000}
-              value={sampleRateHz}
-              onChange={(e) => setSampleRateHz(e.target.value)}
-            />
-            <p className="muted tool-hint">
-              Ctrl+クリックで複数選択。Ctrl+Z / Shift+Ctrl+Z で Undo/Redo。プレビュー上 Ctrl+ホイールで拡大縮小。
-            </p>
-          </aside>
         </div>
-        <MultiTrackTimeline editor={editor} />
+
+        <div
+          className="workspace-split-handle"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="プレビューとタイムラインの高さを調整"
+          onPointerDown={onSplitPointerDown}
+        />
+
+        <div className="editor-timeline-pane" style={{ height: timelineHeightPx, flexShrink: 0 }}>
+          <MultiTrackTimeline editor={editor} />
+        </div>
       </div>
     </>
   );

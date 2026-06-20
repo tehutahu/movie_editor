@@ -4,6 +4,7 @@ import type { EditorStore } from "@/hooks/useEditorStore";
 import { resolveNonOverlappingStart } from "@/lib/editor/clipOps";
 import { formatTimecode, pixelsPerSec, pxToSec, secToPx, filmstripOffsetPercent } from "@/lib/editor/thumbnailMapping";
 import { tracksSortedForTimeline } from "@/lib/editor/project";
+import { timelineTracksAreaHeightPx } from "@/lib/editor/timelineLayout";
 import { useCallback, useRef, useState } from "react";
 
 const DRAG_THRESHOLD_PX = 4;
@@ -26,15 +27,19 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
     addTrack,
     busy,
     clipExportBusyId,
+    speedFactor,
+    setSpeedFactor,
+    sampleRateHz,
+    setSampleRateHz,
   } = editor;
 
   return (
     <div className="timeline-toolbar">
       <div className="timeline-toolbar-left">
-        <button type="button" onClick={addTrack} disabled={Boolean(busy)} title="トラック追加">
+        <button type="button" onClick={addTrack} disabled={Boolean(busy)} title="トラック追加 (Ctrl+T)">
           +
         </button>
-        <button type="button" onClick={splitAtPlayhead} disabled={Boolean(busy)} title="分割">
+        <button type="button" onClick={splitAtPlayhead} disabled={Boolean(busy)} title="分割 (Ctrl+X)">
           ✂
         </button>
         <button type="button" onClick={undoEdit} disabled={!canUndoEdit} title="Undo (Ctrl+Z)">
@@ -43,29 +48,70 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
         <button type="button" onClick={redoEdit} disabled={!canRedoEdit} title="Redo (Shift+Ctrl+Z)">
           ↷
         </button>
-        <button type="button" onClick={mergeSelected} disabled={Boolean(busy)} title="結合">
+        <button type="button" onClick={mergeSelected} disabled={Boolean(busy)} title="結合 (Ctrl+M)">
           ⧉
         </button>
-        <button type="button" onClick={deleteSelected} disabled={Boolean(busy)} title="削除">
+        <button type="button" onClick={deleteSelected} disabled={Boolean(busy)} title="削除 (Delete)">
           🗑
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.duplicateSelected()}
+          disabled={Boolean(busy) || project.selectedClipIds.length === 0}
+          title="複製 (Ctrl+D)"
+        >
+          ⎘
         </button>
         <button
           type="button"
           onClick={() => void downloadSelectedClip()}
           disabled={Boolean(busy) || Boolean(clipExportBusyId)}
-          title="クリップ DL"
+          title="選択クリップ DL (Shift+Ctrl+E)"
         >
           ⬇
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.fitSelectedClipsToCanvas()}
+          disabled={Boolean(busy) || project.selectedClipIds.length === 0}
+          title="画面にフィット（プレビュー上でダブルクリックでも可）"
+        >
+          ⛶
         </button>
       </div>
       <div className="timeline-toolbar-center muted">
         {formatTimecode(project.playheadSec)} / {formatTimecode(project.compositionDurationSec)}
       </div>
       <div className="timeline-toolbar-right">
-        <button type="button" onClick={() => void restoreSpeedForSelected()} disabled={Boolean(busy)}>
-          速度復元
-        </button>
-        <button type="button" className="primary" onClick={() => void exportComposition()} disabled={Boolean(busy)}>
+        <div className="timeline-speed-restore-group">
+          <button type="button" onClick={() => void restoreSpeedForSelected()} disabled={Boolean(busy)}>
+            速度復元
+          </button>
+          <label className="speed-restore-field" title="速度係数">
+            <span>速度</span>
+            <input
+              id="speed-factor"
+              type="number"
+              min={0.1}
+              step={0.1}
+              value={speedFactor}
+              disabled={Boolean(busy)}
+              onChange={(e) => setSpeedFactor(e.target.value)}
+            />
+          </label>
+          <label className="speed-restore-field" title="サンプルレート (Hz)">
+            <span>Hz</span>
+            <input
+              id="sample-rate"
+              type="number"
+              step={1000}
+              value={sampleRateHz}
+              disabled={Boolean(busy)}
+              onChange={(e) => setSampleRateHz(e.target.value)}
+            />
+          </label>
+        </div>
+        <button type="button" className="primary" onClick={() => void exportComposition()} disabled={Boolean(busy)} title="全体書き出し (Ctrl+E)">
           書き出し
         </button>
         <button type="button" onClick={() => setTimelineZoom(Math.max(0.25, timelineZoom - 0.25))}>
@@ -126,6 +172,7 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
 
   const pps = pixelsPerSec(timelineZoom);
   const tracks = tracksSortedForTimeline(project.tracks);
+  const timelineBodyHeightPx = timelineTracksAreaHeightPx(tracks.length);
   const rulerWidth = secToPx(project.compositionDurationSec + 2, pps);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const trackRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -316,6 +363,7 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
       <div
         className="timeline-scroll"
         ref={scrollRef}
+        style={{ height: timelineBodyHeightPx }}
         onPointerDown={onScrubPointerDown}
         onPointerMove={onScrubPointerMove}
         onPointerUp={onScrubPointerUp}

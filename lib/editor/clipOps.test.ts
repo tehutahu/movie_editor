@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyProject, clipFromAsset } from "@/lib/editor/project";
-import { splitClipAtPlayhead, mergeClips, moveClip, resolveNonOverlappingStart } from "@/lib/editor/clipOps";
+import { splitClipAtPlayhead, mergeClips, moveClip, resolveNonOverlappingStart, duplicateClips } from "@/lib/editor/clipOps";
 import type { Asset } from "@/lib/editor/types";
 
 const videoAsset: Asset = {
@@ -90,5 +90,56 @@ describe("clipOps", () => {
 
     const moved = moveClip(project, clip.id, 2);
     expect(moved.clips[0]!.timelineStartSec).toBe(2);
+  });
+
+  it("duplicates clip onto another track at same time", () => {
+    let project = createEmptyProject();
+    const trackA = project.tracks[0]!;
+    const trackB = project.tracks[1]!;
+    const clip = clipFromAsset({
+      asset: videoAsset,
+      trackId: trackA.id,
+      timelineStartSec: 2,
+      durationSec: 4,
+      tracks: project.tracks,
+    });
+    project = { ...project, assets: [videoAsset], clips: [clip] };
+
+    const duplicated = duplicateClips(project, [clip.id]);
+    expect(duplicated).not.toBeNull();
+    expect(duplicated!.clips).toHaveLength(2);
+    const copy = duplicated!.clips.find((c) => c.id !== clip.id)!;
+    expect(copy.trackId).toBe(trackB.id);
+    expect(copy.timelineStartSec).toBe(2);
+    expect(copy.durationSec).toBeCloseTo(4, 2);
+    expect(duplicated!.selectedClipIds).toEqual([copy.id]);
+  });
+
+  it("adds a track when duplicating with no free track at same time", () => {
+    let project = createEmptyProject();
+    const trackA = project.tracks[0]!;
+    const trackB = project.tracks[1]!;
+    const c1 = clipFromAsset({
+      asset: videoAsset,
+      trackId: trackA.id,
+      timelineStartSec: 0,
+      durationSec: 4,
+      tracks: project.tracks,
+    });
+    const c2 = clipFromAsset({
+      asset: videoAsset,
+      trackId: trackB.id,
+      timelineStartSec: 0,
+      durationSec: 4,
+      tracks: project.tracks,
+    });
+    project = { ...project, assets: [videoAsset], clips: [c1, c2] };
+
+    const duplicated = duplicateClips(project, [c1.id]);
+    expect(duplicated).not.toBeNull();
+    expect(duplicated!.tracks).toHaveLength(3);
+    const copy = duplicated!.clips.find((c) => c.id !== c1.id && c.id !== c2.id)!;
+    expect(copy.trackId).not.toBe(trackA.id);
+    expect(copy.timelineStartSec).toBe(0);
   });
 });

@@ -294,6 +294,16 @@ export async function restoreSpeedSameAsShell(params: {
   });
 }
 
+export async function runFfmpegCommand(
+  args: readonly string[],
+  opts?: {
+    totalDurationSec?: number;
+    onProgress?: ((p: ProgressInfo) => void) | undefined;
+  },
+): Promise<void> {
+  return ffmpegFailFast(args, opts);
+}
+
 export async function extractSegmentTimes(params: {
   inputPath: string;
   outputPath: string;

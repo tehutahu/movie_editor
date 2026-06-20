@@ -28,6 +28,7 @@ import {
   computeCompositionDuration,
   createEmptyProject,
 } from "@/lib/editor/project";
+import { fitClipTransformToCanvas } from "@/lib/editor/compositor";
 import type { AppliedJobStep, Asset, ClipTransform, EditorProject } from "@/lib/editor/types";
 
 type JobPollInfo = {
@@ -267,6 +268,23 @@ export function useEditorStore() {
     dispatch({ type: "delete", clipIds: cur.selectedClipIds });
   }, [dispatch, history]);
 
+  const duplicateSelected = useCallback(() => {
+    const cur = getCurrentProject(history);
+    if (cur.selectedClipIds.length === 0) {
+      setError("複製するクリップを選択してください。");
+      return;
+    }
+    setError(null);
+    setHistory((h) => {
+      const result = dispatchCommand(h, { type: "duplicate", clipIds: cur.selectedClipIds });
+      if (!result) {
+        setError("複製できませんでした。");
+        return h;
+      }
+      return result.history;
+    });
+  }, [history]);
+
   const moveSelectedClip = useCallback(
     (clipId: string, newStartSec: number, newTrackId?: string) => {
       dispatch({ type: "move", clipId, newStartSec, newTrackId });
@@ -288,66 +306,99 @@ export function useEditorStore() {
     [dispatch],
   );
 
-  const downloadSelectedClip = useCallback(async () => {
+  const fitSelectedClipsToCanvas = useCallback(() => {
+    setError(null);
+    setHistory((h) => {
+      const cur = getCurrentProject(h);
+      if (cur.selectedClipIds.length === 0) return h;
+      const fit = fitClipTransformToCanvas();
+      const ids = new Set(cur.selectedClipIds);
+      const next: EditorProject = {
+        ...cur,
+        clips: cur.clips.map((c) =>
+          ids.has(c.id) ? { ...c, transform: { ...fit } } : c,
+        ),
+      };
+      return { undoStack: [...h.undoStack, next], redoStack: [] };
+    });
+  }, []);
+
+  const exportSelectedClips = useCallback(async () => {
     setError(null);
     const cur = getCurrentProject(history);
-    const clipId = cur.selectedClipIds[0];
-    if (!clipId) {
-      setError("ダウンロードするクリップを選択してください。");
+    const clipIds = [...cur.selectedClipIds];
+    if (clipIds.length === 0) {
+      setError("エクスポートするクリップを選択してください。");
       return;
     }
-    const clip = cur.clips.find((c) => c.id === clipId);
-    if (!clip) return;
 
-    setClipExportBusyId(clipId);
+    setBusy(
+      clipIds.length > 1
+        ? `選択クリップを書き出し中… (0/${clipIds.length})`
+        : "書き出し中…",
+    );
     try {
-      const part = clip.parts[0];
-      if (!part) throw new Error("クリップに素材がありません。");
-      const asset = cur.assets.find((a) => a.id === part.assetId);
-      if (!asset) throw new Error("素材が見つかりません。");
+      for (let i = 0; i < clipIds.length; i++) {
+        const clipId = clipIds[i]!;
+        const clip = cur.clips.find((c) => c.id === clipId);
+        if (!clip) continue;
 
-      const res = await fetch("/api/jobs/export-segment", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          videoId: part.assetId,
-          sourceJobId: asset.sourceJobId,
-          startSec: part.sourceInSec,
-          endSec: part.sourceInSec + clip.durationSec,
-          exportBaseName: sanitizeExportBaseName(cur.exportBaseName),
-        }),
-      });
-      const json = (await res.json()) as { jobId?: string; error?: string };
-      if (!res.ok) throw new Error(json.error ?? "書き出しに失敗しました。");
-      if (!json.jobId) throw new Error("jobId がありません。");
+        setBusy(`選択クリップを書き出し中… (${i + 1}/${clipIds.length})`);
+        setClipExportBusyId(clipId);
 
-      const info = await pollJobUntil(json.jobId, {
-        onTick: (j) => {
-          setLiveJob(j);
-          setJobPhase(`export:${j.status}`);
-        },
-      });
-      if (info.status === "error") throw new Error(info.error ?? "書き出し失敗");
+        const part = clip.parts[0];
+        if (!part) throw new Error("クリップに素材がありません。");
+        const asset = cur.assets.find((a) => a.id === part.assetId);
+        if (!asset) throw new Error("素材が見つかりません。");
 
-      const filename = buildDownloadFilename(
-        sanitizeExportBaseName(cur.exportBaseName),
-        `clip_${clip.timelineStartSec.toFixed(1)}`,
-        "mp4",
-      );
-      const a = document.createElement("a");
-      a.href = `/api/download/${json.jobId}?downloadName=${encodeURIComponent(filename)}`;
-      a.rel = "noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+        const res = await fetch("/api/jobs/export-segment", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            videoId: part.assetId,
+            sourceJobId: asset.sourceJobId,
+            startSec: part.sourceInSec,
+            endSec: part.sourceInSec + clip.durationSec,
+            exportBaseName: sanitizeExportBaseName(cur.exportBaseName),
+          }),
+        });
+        const json = (await res.json()) as { jobId?: string; error?: string };
+        if (!res.ok) throw new Error(json.error ?? "書き出しに失敗しました。");
+        if (!json.jobId) throw new Error("jobId がありません。");
+
+        const info = await pollJobUntil(json.jobId, {
+          onTick: (j) => {
+            setLiveJob(j);
+            setJobPhase(`export:${j.status}`);
+          },
+        });
+        if (info.status === "error") throw new Error(info.error ?? "書き出し失敗");
+
+        const filename = buildDownloadFilename(
+          sanitizeExportBaseName(cur.exportBaseName),
+          `clip_${clip.timelineStartSec.toFixed(1)}`,
+          "mp4",
+        );
+        const a = document.createElement("a");
+        a.href = `/api/download/${json.jobId}?downloadName=${encodeURIComponent(filename)}`;
+        a.rel = "noreferrer";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setClipExportBusyId(null);
+      setBusy(null);
       setLiveJob(null);
       setJobPhase(null);
     }
   }, [history]);
+
+  const downloadSelectedClip = useCallback(async () => {
+    await exportSelectedClips();
+  }, [exportSelectedClips]);
 
   const restoreSpeedForSelected = useCallback(async () => {
     setError(null);
@@ -486,18 +537,74 @@ export function useEditorStore() {
   }, [history]);
 
   useEffect(() => {
+    function isEditableTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      if (target.isContentEditable) return true;
+      const tag = target.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    }
+
     function onKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey) {
+      if (isEditableTarget(e.target)) return;
+
+      const mod = e.ctrlKey || e.metaKey;
+
+      if (mod && e.shiftKey && (e.key === "e" || e.key === "E")) {
+        e.preventDefault();
+        void exportSelectedClips();
+        return;
+      }
+      if (mod && (e.key === "e" || e.key === "E")) {
+        e.preventDefault();
+        void exportComposition();
+        return;
+      }
+      if (mod && (e.key === "d" || e.key === "D")) {
+        e.preventDefault();
+        duplicateSelected();
+        return;
+      }
+      if (mod && (e.key === "m" || e.key === "M")) {
+        e.preventDefault();
+        mergeSelected();
+        return;
+      }
+      if (mod && (e.key === "x" || e.key === "X")) {
+        e.preventDefault();
+        splitAtPlayhead();
+        return;
+      }
+      if (mod && (e.key === "t" || e.key === "T")) {
+        e.preventDefault();
+        addTrack();
+        return;
+      }
+      if (e.key === "Delete") {
+        e.preventDefault();
+        deleteSelected();
+        return;
+      }
+      if (mod && e.key === "z" && e.shiftKey) {
         e.preventDefault();
         redoEdit();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+      } else if (mod && e.key === "z") {
         e.preventDefault();
         undoEdit();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [undoEdit, redoEdit]);
+  }, [
+    addTrack,
+    deleteSelected,
+    duplicateSelected,
+    exportComposition,
+    exportSelectedClips,
+    mergeSelected,
+    redoEdit,
+    splitAtPlayhead,
+    undoEdit,
+  ]);
 
   return {
     project,
@@ -522,10 +629,13 @@ export function useEditorStore() {
     splitAtPlayhead,
     mergeSelected,
     deleteSelected,
+    duplicateSelected,
     moveSelectedClip,
     resizeClipDuration,
     updateClipTransform,
+    fitSelectedClipsToCanvas,
     downloadSelectedClip,
+    exportSelectedClips,
     restoreSpeedForSelected,
     exportComposition,
     setPlayheadSec,

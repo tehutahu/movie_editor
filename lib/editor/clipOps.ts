@@ -5,7 +5,7 @@ import {
   MIN_CLIP_DURATION_SEC,
   SPLIT_EDGE_EPS_SEC,
 } from "@/lib/editor/types";
-import { computeCompositionDuration, findAsset } from "@/lib/editor/project";
+import { computeCompositionDuration, findAsset, addTrackToProject, tracksSortedForTimeline } from "@/lib/editor/project";
 
 function cloneProject(p: EditorProject): EditorProject {
   return structuredClone(p);
@@ -200,6 +200,82 @@ export function mergeClips(
   next.selectedClipIds = [merged.id];
   next.compositionDurationSec = computeCompositionDuration(next.clips);
   return next;
+}
+
+export function clipFitsOnTrackAt(
+  clips: readonly Clip[],
+  trackId: string,
+  startSec: number,
+  durationSec: number,
+): boolean {
+  return !clips.some(
+    (c) =>
+      c.trackId === trackId &&
+      clipsOverlap(startSec, durationSec, c.timelineStartSec, c.durationSec),
+  );
+}
+
+export function findAvailableTrackForDuplicate(
+  project: EditorProject,
+  clip: Clip,
+  avoidTrackIds: ReadonlySet<string>,
+): string | undefined {
+  for (const track of tracksSortedForTimeline(project.tracks)) {
+    if (avoidTrackIds.has(track.id)) continue;
+    if (
+      clipFitsOnTrackAt(
+        project.clips,
+        track.id,
+        clip.timelineStartSec,
+        clip.durationSec,
+      )
+    ) {
+      return track.id;
+    }
+  }
+  return undefined;
+}
+
+export function duplicateClips(
+  project: EditorProject,
+  clipIds: readonly string[],
+): EditorProject | null {
+  if (clipIds.length === 0) return null;
+
+  let working = cloneProject(project);
+  const reservedTracks = new Set<string>();
+  const newClipIds: string[] = [];
+
+  for (const clipId of clipIds) {
+    const clip = working.clips.find((c) => c.id === clipId);
+    if (!clip) continue;
+
+    const avoid = new Set(reservedTracks);
+    avoid.add(clip.trackId);
+
+    let targetTrackId = findAvailableTrackForDuplicate(working, clip, avoid);
+    if (!targetTrackId) {
+      const beforeIds = new Set(working.tracks.map((t) => t.id));
+      working = addTrackToProject(working);
+      targetTrackId = working.tracks.find((t) => !beforeIds.has(t.id))?.id;
+      if (!targetTrackId) continue;
+    }
+
+    const duplicate: Clip = {
+      ...structuredClone(clip),
+      id: newId(),
+      trackId: targetTrackId,
+    };
+    working.clips = [...working.clips, duplicate];
+    newClipIds.push(duplicate.id);
+    reservedTracks.add(targetTrackId);
+  }
+
+  if (newClipIds.length === 0) return null;
+
+  working.selectedClipIds = newClipIds;
+  working.compositionDurationSec = computeCompositionDuration(working.clips);
+  return working;
 }
 
 export function moveClip(

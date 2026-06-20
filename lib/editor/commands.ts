@@ -3,6 +3,7 @@ import type { Clip, ClipTransform, EditorProject } from "@/lib/editor/types";
 import {
   addClipToProject,
   deleteClips,
+  duplicateClips,
   mergeClips,
   moveClip,
   resizeClip,
@@ -20,6 +21,7 @@ export type EditorCommand =
   | { type: "delete"; clipIds: string[] }
   | { type: "addClip"; clip: Clip }
   | { type: "addTrack" }
+  | { type: "duplicate"; clipIds: string[] }
   | {
       type: "restoreSpeed";
       assetId: string;
@@ -50,6 +52,8 @@ export function applyCommand(
       return addClipToProject(project, command.clip);
     case "addTrack":
       return addTrackToProject(project);
+    case "duplicate":
+      return duplicateClips(project, command.clipIds);
     case "restoreSpeed":
       return applySpeedRestoreToProject(project, {
         assetId: command.assetId,

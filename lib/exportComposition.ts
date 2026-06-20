@@ -1,20 +1,36 @@
 import type { Asset, Clip, EditorProject, Track } from "@/lib/editor/types";
 import { resolveAssetInputPath } from "@/lib/assetResolve";
 import {
+  clipsForExportComposition,
+  COMPOSITION_BG_FFMPEG,
+  EXPORT_HEIGHT,
+  EXPORT_WIDTH,
+  resolveAudioTrackForExport,
+  transformToPixelRect,
+} from "@/lib/editor/compositor";
+import {
   buildConcatDemuxerListFile,
   concatViaDemuxer,
   extractSegmentTimes,
   imageToVideoSegment,
   probeVideo,
+  runFfmpegCommand,
 } from "@/lib/ffmpeg";
 import { writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { tracksSortedForPreview } from "@/lib/editor/project";
 
 type ExportClipInput = {
   clip: Clip;
   asset: Asset;
   inputPath: string;
+};
+
+type PreparedClip = {
+  path: string;
+  clip: Clip;
+  asset: Asset;
+  inputIndex: number;
+  rect: ReturnType<typeof transformToPixelRect>;
 };
 
 async function renderClipPartSegment(
@@ -111,7 +127,101 @@ async function renderClipToPart(
   return outPath;
 }
 
-/** Export full composition as single MP4 (stacked by track order, bottom track base). */
+async function prepareCompositionClips(
+  project: EditorProject,
+  jobDir: string,
+): Promise<PreparedClip[]> {
+  const sorted = clipsForExportComposition(project);
+  const prepared: PreparedClip[] = [];
+  let partIndex = 0;
+
+  for (const { clip, asset } of sorted) {
+    const inputPath = await resolveAssetInputPath(asset);
+    if (!inputPath) continue;
+
+    const rendered = await renderClipToPart(
+      jobDir,
+      partIndex++,
+      { clip, asset, inputPath },
+      project.assets,
+    );
+
+    prepared.push({
+      path: rendered,
+      clip,
+      asset,
+      inputIndex: prepared.length + 1,
+      rect: transformToPixelRect(clip.transform, EXPORT_WIDTH, EXPORT_HEIGHT),
+    });
+  }
+
+  return prepared;
+}
+
+function buildCompositionVideoFilterGraph(prepared: readonly PreparedClip[]): string {
+  const filters: string[] = [];
+  let currentV = "0:v";
+
+  if (prepared.length === 0) {
+    filters.push("[0:v]format=yuv420p[vout]");
+    return filters.join(";");
+  }
+
+  for (let i = 0; i < prepared.length; i++) {
+    const p = prepared[i]!;
+    const scaled = `vs${i}`;
+    const out = i === prepared.length - 1 ? "vout" : `vo${i}`;
+    const start = p.clip.timelineStartSec;
+    const end = p.clip.timelineStartSec + p.clip.durationSec;
+    filters.push(`[${p.inputIndex}:v]scale=${p.rect.w}:${p.rect.h}[${scaled}]`);
+    filters.push(
+      `[${currentV}][${scaled}]overlay=${p.rect.x}:${p.rect.y}:enable='between(t\\,${start}\\,${end})'[${out}]`,
+    );
+    currentV = out;
+  }
+
+  return filters.join(";");
+}
+
+async function buildCompositionAudioFilterGraph(
+  prepared: readonly PreparedClip[],
+  audioTrack: Track | undefined,
+  project: EditorProject,
+): Promise<{ filterPart: string | null; audioMapLabel: string | null }> {
+  const audioClipIds = new Set(
+    audioTrack
+      ? project.clips.filter((c) => c.trackId === audioTrack.id).map((c) => c.id)
+      : [],
+  );
+
+  const filters: string[] = [];
+  const audioLabels: string[] = [];
+
+  for (const p of prepared) {
+    if (!audioClipIds.has(p.clip.id)) continue;
+    if (p.asset.kind !== "video") continue;
+    const probe = await probeVideo(p.path);
+    if (!probe.hasAudio) continue;
+    const label = `ad${p.inputIndex}`;
+    const delayMs = Math.round(p.clip.timelineStartSec * 1000);
+    filters.push(`[${p.inputIndex}:a]adelay=${delayMs}|${delayMs}[${label}]`);
+    audioLabels.push(`[${label}]`);
+  }
+
+  if (audioLabels.length === 0) {
+    return { filterPart: null, audioMapLabel: null };
+  }
+  if (audioLabels.length === 1) {
+    return { filterPart: filters.join(";"), audioMapLabel: audioLabels[0]! };
+  }
+
+  filters.push(
+    `${audioLabels.join("")}amix=inputs=${audioLabels.length}:duration=longest:normalize=0[aout]`,
+  );
+  return { filterPart: filters.join(";"), audioMapLabel: "[aout]" };
+}
+
+/** Export full composition as single MP4 with preview-matched layout on a fixed canvas. */
 export async function exportCompositionToFile(params: {
   project: EditorProject;
   jobDir: string;
@@ -119,72 +229,51 @@ export async function exportCompositionToFile(params: {
   onProgress?: (pct: number) => void;
 }): Promise<void> {
   const { project, jobDir, outputPath } = params;
-  const tracks = tracksSortedForPreview(project.tracks);
   const duration = project.compositionDurationSec;
+  const fps = 30;
 
-  const trackParts: string[] = [];
-  let partIndex = 0;
-
-  for (const track of tracks) {
-    const trackClips = project.clips
-      .filter((c) => c.trackId === track.id)
-      .sort((a, b) => a.timelineStartSec - b.timelineStartSec);
-
-    if (trackClips.length === 0) continue;
-
-    const clipPaths: string[] = [];
-    for (const clip of trackClips) {
-      const assetId = clip.parts[0]?.assetId;
-      if (!assetId) continue;
-      const asset = project.assets.find((a) => a.id === assetId);
-      if (!asset) continue;
-      const inputPath = await resolveAssetInputPath(asset);
-      if (!inputPath) continue;
-
-      const gap = clip.timelineStartSec - (clipPaths.length > 0 ? clip.timelineStartSec : 0);
-      void gap;
-
-      const rendered = await renderClipToPart(jobDir, partIndex++, {
-        clip,
-        asset,
-        inputPath,
-      }, project.assets);
-      clipPaths.push(rendered);
-    }
-
-    if (clipPaths.length === 1) {
-      trackParts.push(clipPaths[0]!);
-    } else if (clipPaths.length > 1) {
-      const listPath = path.join(jobDir, `track_${track.id}_concat.txt`);
-      await writeFile(listPath, buildConcatDemuxerListFile(clipPaths), "utf8");
-      const merged = path.join(jobDir, `track_${track.id}.mp4`);
-      const probe = await probeVideo(clipPaths[0]!);
-      await concatViaDemuxer({
-        listTxtAbsolutePath: listPath,
-        outputPath: merged,
-        outputHasAudio: probe.hasAudio,
-      });
-      trackParts.push(merged);
-    }
-  }
-
-  if (trackParts.length === 0) {
+  const prepared = await prepareCompositionClips(project, jobDir);
+  if (prepared.length === 0) {
     throw new Error("書き出すクリップがありません。");
   }
 
-  if (trackParts.length === 1) {
-    const { copyFile } = await import("node:fs/promises");
-    await copyFile(trackParts[0]!, outputPath);
-    return;
+  const audioTrack = resolveAudioTrackForExport(project);
+  const videoFilter = buildCompositionVideoFilterGraph(prepared);
+  const audioFilter = await buildCompositionAudioFilterGraph(prepared, audioTrack, project);
+  const filterComplex = audioFilter.filterPart
+    ? `${videoFilter};${audioFilter.filterPart}`
+    : videoFilter;
+
+  const args: string[] = [
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    `color=c=${COMPOSITION_BG_FFMPEG}:s=${EXPORT_WIDTH}x${EXPORT_HEIGHT}:d=${duration}:r=${fps}`,
+  ];
+  for (const p of prepared) {
+    args.push("-i", p.path);
   }
 
-  const listPath = path.join(jobDir, "composition_concat.txt");
-  await writeFile(listPath, buildConcatDemuxerListFile(trackParts), "utf8");
-  const probe = await probeVideo(trackParts[0]!);
-  await concatViaDemuxer({
-    listTxtAbsolutePath: listPath,
+  args.push("-filter_complex", filterComplex, "-map", "[vout]");
+  if (audioFilter.audioMapLabel) {
+    args.push("-map", audioFilter.audioMapLabel, "-c:a", "aac");
+  } else {
+    args.push("-an");
+  }
+  args.push(
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    "-t",
+    String(duration),
     outputPath,
-    outputHasAudio: probe.hasAudio,
+  );
+
+  await runFfmpegCommand(args, {
     totalDurationSec: duration,
     onProgress: params.onProgress
       ? (p) => {
@@ -193,8 +282,8 @@ export async function exportCompositionToFile(params: {
       : undefined,
   });
 
-  for (const p of trackParts) {
-    await unlink(p).catch(() => undefined);
+  for (const p of prepared) {
+    await unlink(p.path).catch(() => undefined);
   }
 }
 
