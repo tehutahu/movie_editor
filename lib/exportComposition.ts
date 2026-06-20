@@ -84,7 +84,7 @@ async function renderClipToPart(
     const part = item.clip.parts[pi]!;
     const asset = assets.find((a) => a.id === part.assetId);
     if (!asset) continue;
-    const inputPath = await resolveAssetInputPath(part.assetId);
+    const inputPath = await resolveAssetInputPath(asset);
     if (!inputPath) continue;
     segmentPaths.push(
       await renderClipPartSegment(jobDir, index, pi, asset, part, inputPath),
@@ -138,7 +138,7 @@ export async function exportCompositionToFile(params: {
       if (!assetId) continue;
       const asset = project.assets.find((a) => a.id === assetId);
       if (!asset) continue;
-      const inputPath = await resolveAssetInputPath(assetId);
+      const inputPath = await resolveAssetInputPath(asset);
       if (!inputPath) continue;
 
       const gap = clip.timelineStartSec - (clipPaths.length > 0 ? clip.timelineStartSec : 0);

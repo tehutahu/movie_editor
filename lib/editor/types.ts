@@ -5,6 +5,8 @@ export type Asset = {
   kind: AssetKind;
   /** Stream URL for preview / export */
   streamUrl: string;
+  /** 速度復元などで参照するジョブ成果（未設定時はアップロード原本） */
+  sourceJobId?: string;
   displayName: string;
   sourceDurationSec?: number;
   width?: number;

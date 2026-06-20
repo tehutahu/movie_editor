@@ -6,7 +6,7 @@ import type { ActiveClipLayer } from "@/lib/editor/compositor";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 function mediaPoolKey(layer: ActiveClipLayer): string {
-  return `${layer.clip.id}:${layer.asset.id}`;
+  return `${layer.clip.id}:${layer.asset.id}:${layer.asset.streamUrl}`;
 }
 
 export function CompositorPreview({ editor }: { editor: EditorStore }) {

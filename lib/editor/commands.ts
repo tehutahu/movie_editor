@@ -1,3 +1,4 @@
+import { applySpeedRestoreToProject } from "@/lib/editor/applySpeedRestore";
 import type { Clip, ClipTransform, EditorProject } from "@/lib/editor/types";
 import {
   addClipToProject,
@@ -18,7 +19,14 @@ export type EditorCommand =
   | { type: "transform"; clipId: string; transform: ClipTransform }
   | { type: "delete"; clipIds: string[] }
   | { type: "addClip"; clip: Clip }
-  | { type: "addTrack" };
+  | { type: "addTrack" }
+  | {
+      type: "restoreSpeed";
+      assetId: string;
+      jobId: string;
+      speedFactor: number;
+      restoredDurationSec: number;
+    };
 
 export function applyCommand(
   project: EditorProject,
@@ -42,6 +50,13 @@ export function applyCommand(
       return addClipToProject(project, command.clip);
     case "addTrack":
       return addTrackToProject(project);
+    case "restoreSpeed":
+      return applySpeedRestoreToProject(project, {
+        assetId: command.assetId,
+        jobId: command.jobId,
+        speedFactor: command.speedFactor,
+        restoredDurationSec: command.restoredDurationSec,
+      });
     default:
       return null;
   }

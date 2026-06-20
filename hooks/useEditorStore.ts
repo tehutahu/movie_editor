@@ -303,12 +303,15 @@ export function useEditorStore() {
     try {
       const part = clip.parts[0];
       if (!part) throw new Error("クリップに素材がありません。");
+      const asset = cur.assets.find((a) => a.id === part.assetId);
+      if (!asset) throw new Error("素材が見つかりません。");
 
       const res = await fetch("/api/jobs/export-segment", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           videoId: part.assetId,
+          sourceJobId: asset.sourceJobId,
           startSec: part.sourceInSec,
           endSec: part.sourceInSec + clip.durationSec,
           exportBaseName: sanitizeExportBaseName(cur.exportBaseName),
@@ -361,6 +364,17 @@ export function useEditorStore() {
       return;
     }
 
+    const factor = Number(speedFactor);
+    const sr = Number(sampleRateHz);
+    if (!(factor > 0) || !Number.isFinite(factor)) {
+      setError("速度係数が不正です。");
+      return;
+    }
+    if (!(sr > 0) || !Number.isFinite(sr)) {
+      setError("サンプルレートが不正です。");
+      return;
+    }
+
     setBusy("速度復元中…");
     setJobPhase("restore:queued");
     try {
@@ -369,8 +383,9 @@ export function useEditorStore() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           videoId: asset.id,
-          speedFactor: Number(speedFactor),
-          sampleRateHz: Number(sampleRateHz),
+          sourceJobId: asset.sourceJobId,
+          speedFactor: factor,
+          sampleRateHz: sr,
           exportBaseName: sanitizeExportBaseName(cur.exportBaseName),
         }),
       });
@@ -385,6 +400,23 @@ export function useEditorStore() {
         },
       });
       if (info.status === "error") throw new Error(info.error ?? "復元失敗");
+
+      const metaRes = await fetch(`/api/jobs/${json.jobId}/metadata`, { cache: "no-store" });
+      const metaJson = (await metaRes.json()) as { durationSec?: number; error?: string };
+      if (!metaRes.ok || typeof metaJson.durationSec !== "number") {
+        throw new Error(metaJson.error ?? "復元後のメタデータ取得に失敗しました。");
+      }
+
+      setHistory((h) => {
+        const result = dispatchCommand(h, {
+          type: "restoreSpeed",
+          assetId: asset.id,
+          jobId: json.jobId!,
+          speedFactor: factor,
+          restoredDurationSec: metaJson.durationSec!,
+        });
+        return result?.history ?? h;
+      });
 
       setAppliedJobSteps((prev) => [
         ...prev,
