@@ -14,6 +14,8 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mediaPoolRef = useRef<Map<string, HTMLVideoElement | HTMLImageElement>>(new Map());
   const [isPlaying, setIsPlaying] = useState(false);
+  const isPlayingRef = useRef(false);
+  isPlayingRef.current = isPlaying;
   const drawRafRef = useRef<number | null>(null);
   const playRafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
@@ -56,6 +58,27 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
   const drawRef = useRef<(() => void) | null>(null);
 
+  const syncVideoTime = useCallback((media: HTMLVideoElement, targetSec: number, playing: boolean) => {
+    if (playing) {
+      if (media.paused) {
+        if (Math.abs(media.currentTime - targetSec) > 0.05) {
+          media.currentTime = targetSec;
+        }
+        void media.play().catch(() => {});
+        return;
+      }
+      if (Math.abs(media.currentTime - targetSec) > 0.35) {
+        media.currentTime = targetSec;
+      }
+      return;
+    }
+
+    if (!media.paused) media.pause();
+    if (Math.abs(media.currentTime - targetSec) > 0.02) {
+      media.currentTime = targetSec;
+    }
+  }, []);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -77,8 +100,13 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     ctx.fillRect(0, 0, w, h);
 
     const layers = resolveActiveClipsAtPlayhead(proj, proj.playheadSec);
+    const activeKeys = new Set<string>();
+    const playing = isPlayingRef.current;
+
     for (const layer of layers) {
       const media = ensureMedia(layer);
+      const key = mediaPoolKey(layer);
+      activeKeys.add(key);
       const { x, y, scale } = layer.clip.transform;
       const drawW = w * 0.5 * scale;
       const drawH = h * 0.5 * scale;
@@ -86,16 +114,13 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
       const cy = y * h;
 
       if (media instanceof HTMLVideoElement) {
-        const t = layer.sourceTimeSec;
-        if (Math.abs(media.currentTime - t) > 0.04) {
-          media.currentTime = t;
-        }
+        syncVideoTime(media, layer.sourceTimeSec, playing);
       }
 
       ctx.save();
       const canDraw =
         media instanceof HTMLVideoElement
-          ? media.readyState >= 2
+          ? media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && media.videoWidth > 0
           : media instanceof HTMLImageElement && media.complete && media.naturalWidth > 0;
 
       if (canDraw) {
@@ -109,7 +134,12 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
         ctx.strokeRect(cx - drawW / 2, cy - drawH / 2, drawW, drawH);
       }
     }
-  }, [ensureMedia]);
+
+    for (const [key, media] of mediaPoolRef.current) {
+      if (activeKeys.has(key) || !(media instanceof HTMLVideoElement)) continue;
+      if (!media.paused) media.pause();
+    }
+  }, [ensureMedia, syncVideoTime]);
 
   drawRef.current = draw;
 
@@ -162,10 +192,8 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     if (!vid || !audio) return;
     const absUrl = new URL(audio.asset.streamUrl, window.location.origin).href;
     if (vid.src !== absUrl) vid.src = audio.asset.streamUrl;
-    if (Math.abs(vid.currentTime - audio.sourceTimeSec) > 0.05) {
-      vid.currentTime = audio.sourceTimeSec;
-    }
-  }, [project, project.playheadSec, audioVideoRef]);
+    syncVideoTime(vid, audio.sourceTimeSec, isPlaying);
+  }, [project, project.playheadSec, audioVideoRef, isPlaying, syncVideoTime]);
 
   useEffect(() => {
     for (const asset of project.assets) {

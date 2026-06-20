@@ -250,8 +250,16 @@ export function useEditorStore() {
       setError("結合するクリップを2つ以上選択してください（Ctrl+クリック）。");
       return;
     }
-    dispatch({ type: "merge", clipIds: cur.selectedClipIds });
-  }, [dispatch, history]);
+    setError(null);
+    setHistory((h) => {
+      const result = dispatchCommand(h, { type: "merge", clipIds: cur.selectedClipIds });
+      if (!result) {
+        setError("結合できませんでした。同一トラック上のクリップを選択してください。");
+        return h;
+      }
+      return result.history;
+    });
+  }, [history]);
 
   const deleteSelected = useCallback(() => {
     const cur = getCurrentProject(history);

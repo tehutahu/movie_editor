@@ -1,6 +1,7 @@
 "use client";
 
 import type { EditorStore } from "@/hooks/useEditorStore";
+import { resolveNonOverlappingStart } from "@/lib/editor/clipOps";
 import { formatTimecode, pixelsPerSec, pxToSec, secToPx, filmstripOffsetPercent } from "@/lib/editor/thumbnailMapping";
 import { tracksSortedForTimeline } from "@/lib/editor/project";
 import { useCallback, useRef, useState } from "react";
@@ -250,10 +251,15 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
       if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
       const dSec = pxToSec(dx, pps);
       const trackId = trackIdFromClientY(e.clientY) ?? drag.origTrackId;
+      const clip = project.clips.find((c) => c.id === drag.clipId);
+      const rawStart = Math.max(0, drag.origStart + dSec);
+      const startSec = clip
+        ? resolveNonOverlappingStart(project.clips, drag.clipId, trackId, rawStart, clip.durationSec)
+        : rawStart;
       setDrag({ ...drag, moved: true });
       setDragPreview({
         clipId: drag.clipId,
-        startSec: Math.max(0, drag.origStart + dSec),
+        startSec,
         trackId,
       });
     } else {
@@ -281,8 +287,6 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
       moveSelectedClip(dragPreview.clipId, dragPreview.startSec, dragPreview.trackId);
     } else if (drag.kind === "resize" && dragPreview?.durationSec !== undefined && drag.moved) {
       resizeClipDuration(drag.clipId, dragPreview.durationSec);
-    } else if (drag.kind === "move" && !drag.moved) {
-      selectClip(drag.clipId, drag.additive);
     }
 
     setDrag(null);

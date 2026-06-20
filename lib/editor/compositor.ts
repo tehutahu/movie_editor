@@ -1,6 +1,6 @@
 import type { Asset, Clip, EditorProject, Track } from "@/lib/editor/types";
 import { findAsset, tracksSortedForPreview } from "@/lib/editor/project";
-import { getClipAtPlayhead, sourceTimeAtPlayhead } from "@/lib/editor/clipOps";
+import { getClipAtPlayhead, partAndSourceAtClipOffset } from "@/lib/editor/clipOps";
 
 export type ActiveClipLayer = {
   clip: Clip;
@@ -18,14 +18,15 @@ export function resolveActiveClipsAtPlayhead(
 
   for (const clip of project.clips) {
     if (!getClipAtPlayhead(clip, playheadSec)) continue;
-    const sourceTime = sourceTimeAtPlayhead(clip, playheadSec);
-    if (sourceTime === null) continue;
-    const asset = findAsset(project.assets, clip.parts[0]?.assetId ?? "");
+    const rel = playheadSec - clip.timelineStartSec;
+    const resolved = partAndSourceAtClipOffset(clip, rel);
+    if (!resolved) continue;
+    const asset = findAsset(project.assets, resolved.part.assetId);
     if (!asset) continue;
     layers.push({
       clip,
       asset,
-      sourceTimeSec: sourceTime,
+      sourceTimeSec: resolved.sourceSec,
       trackOrder: trackOrderMap.get(clip.trackId) ?? 0,
     });
   }
@@ -48,11 +49,12 @@ export function resolveAudioClipAtPlayhead(
       (c) => c.trackId === track.id && getClipAtPlayhead(c, playheadSec),
     );
     if (!clip) continue;
-    const asset = findAsset(project.assets, clip.parts[0]?.assetId ?? "");
+    const rel = playheadSec - clip.timelineStartSec;
+    const resolved = partAndSourceAtClipOffset(clip, rel);
+    if (!resolved) continue;
+    const asset = findAsset(project.assets, resolved.part.assetId);
     if (!asset || asset.kind !== "video") continue;
-    const sourceTime = sourceTimeAtPlayhead(clip, playheadSec);
-    if (sourceTime === null) continue;
-    return { clip, asset, sourceTimeSec: sourceTime };
+    return { clip, asset, sourceTimeSec: resolved.sourceSec };
   }
   return null;
 }

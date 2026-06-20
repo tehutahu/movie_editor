@@ -15,6 +15,65 @@ function partDuration(part: ClipPart): number {
   return part.sourceOutSec - part.sourceInSec;
 }
 
+export function partAndSourceAtClipOffset(
+  clip: Clip,
+  timelineOffsetSec: number,
+): { part: ClipPart; sourceSec: number } | null {
+  const mapped = mapPartAtTimelineOffset(clip, timelineOffsetSec);
+  if (!mapped) return null;
+  const part = clip.parts[mapped.partIndex];
+  if (!part) return null;
+  return { part, sourceSec: mapped.sourceSec };
+}
+
+export function clipEndSec(clip: Clip): number {
+  return clip.timelineStartSec + clip.durationSec;
+}
+
+function clipsOverlap(
+  startA: number,
+  durA: number,
+  startB: number,
+  durB: number,
+): boolean {
+  return startA < startB + durB - 1e-9 && startA + durA > startB + 1e-9;
+}
+
+export function resolveNonOverlappingStart(
+  clips: readonly Clip[],
+  clipId: string,
+  trackId: string,
+  desiredStartSec: number,
+  durationSec: number,
+): number {
+  let start = Math.max(0, desiredStartSec);
+  const others = clips
+    .filter((c) => c.trackId === trackId && c.id !== clipId)
+    .sort((a, b) => a.timelineStartSec - b.timelineStartSec);
+
+  for (let pass = 0; pass <= others.length; pass++) {
+    let adjusted = false;
+    for (const other of others) {
+      const oStart = other.timelineStartSec;
+      const oEnd = clipEndSec(other);
+      if (!clipsOverlap(start, durationSec, oStart, other.durationSec)) continue;
+
+      const snapBefore = oStart - durationSec;
+      const snapAfter = oEnd;
+      if (snapBefore >= 0 && Math.abs(desiredStartSec - snapBefore) <= Math.abs(desiredStartSec - snapAfter)) {
+        start = snapBefore;
+      } else {
+        start = snapAfter;
+      }
+      adjusted = true;
+      break;
+    }
+    if (!adjusted) break;
+  }
+
+  return Math.max(0, start);
+}
+
 function mapPartAtTimelineOffset(
   clip: Clip,
   timelineOffsetSec: number,
@@ -120,12 +179,9 @@ export function mergeClips(
 
   const sorted = [...clips].sort((a, b) => a.timelineStartSec - b.timelineStartSec);
   const mergedParts: ClipPart[] = [];
-  let cursor = sorted[0]!.timelineStartSec;
 
   for (const clip of sorted) {
-    if (clip.timelineStartSec > cursor + 1e-6) return null;
     mergedParts.push(...clip.parts.map((p) => ({ ...p })));
-    cursor = clip.timelineStartSec + clip.durationSec;
   }
 
   const totalDur = mergedParts.reduce((s, p) => s + partDuration(p), 0);
@@ -152,13 +208,25 @@ export function moveClip(
   newStartSec: number,
   newTrackId?: string,
 ): EditorProject {
+  const clip = project.clips.find((c) => c.id === clipId);
+  if (!clip) return project;
+
+  const trackId = newTrackId ?? clip.trackId;
+  const resolvedStart = resolveNonOverlappingStart(
+    project.clips,
+    clipId,
+    trackId,
+    newStartSec,
+    clip.durationSec,
+  );
+
   const next = cloneProject(project);
   next.clips = next.clips.map((c) => {
     if (c.id !== clipId) return c;
     return {
       ...c,
-      timelineStartSec: Math.max(0, newStartSec),
-      trackId: newTrackId ?? c.trackId,
+      timelineStartSec: resolvedStart,
+      trackId,
     };
   });
   next.compositionDurationSec = computeCompositionDuration(next.clips);
