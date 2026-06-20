@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 
 export type ProbeInfo = {
   durationSec: number;
@@ -18,6 +19,49 @@ type ProgressInfo = {
   progressPct?: number;
   etaSec?: number;
 };
+
+let resolvedFfmpeg: string | null = null;
+let resolvedFfprobe: string | null = null;
+
+export function resolveFfmpegPath(): string {
+  if (resolvedFfmpeg) return resolvedFfmpeg;
+  if (process.env.FFMPEG_PATH) {
+    resolvedFfmpeg = process.env.FFMPEG_PATH;
+    return resolvedFfmpeg;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ffmpegStatic = require("ffmpeg-static") as string | null;
+    if (ffmpegStatic) {
+      resolvedFfmpeg = path.resolve(ffmpegStatic);
+      return resolvedFfmpeg;
+    }
+  } catch {
+    // fall through to PATH
+  }
+  resolvedFfmpeg = "ffmpeg";
+  return resolvedFfmpeg;
+}
+
+export function resolveFfprobePath(): string {
+  if (resolvedFfprobe) return resolvedFfprobe;
+  if (process.env.FFPROBE_PATH) {
+    resolvedFfprobe = process.env.FFPROBE_PATH;
+    return resolvedFfprobe;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ffprobeStatic = require("ffprobe-static") as { path: string };
+    if (ffprobeStatic?.path) {
+      resolvedFfprobe = path.resolve(ffprobeStatic.path);
+      return resolvedFfprobe;
+    }
+  } catch {
+    // fall through
+  }
+  resolvedFfprobe = "ffprobe";
+  return resolvedFfprobe;
+}
 
 function run(cmd: string, args: readonly string[]): Promise<CmdResult> {
   return new Promise((resolve, reject) => {
@@ -50,8 +94,9 @@ async function ffmpegFailFast(args: readonly string[], opts?: {
   totalDurationSec?: number;
   onProgress?: ((p: ProgressInfo) => void) | undefined;
 }): Promise<void> {
+  const ffmpegPath = resolveFfmpegPath();
   await new Promise<void>((resolve, reject) => {
-    const proc = spawn("ffmpeg", ["-progress", "pipe:1", ...args], {
+    const proc = spawn(ffmpegPath, ["-progress", "pipe:1", ...args], {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -109,8 +154,10 @@ export async function assertFfmpegAvailable(): Promise<{
   ffmpeg: string;
   ffprobe: string;
 }> {
-  const ffmpegProbe = await run("ffmpeg", ["-version"]);
-  const ffprobeProbe = await run("ffprobe", ["-version"]);
+  const ffmpegPath = resolveFfmpegPath();
+  const ffprobePath = resolveFfprobePath();
+  const ffmpegProbe = await run(ffmpegPath, ["-version"]);
+  const ffprobeProbe = await run(ffprobePath, ["-version"]);
 
   if (ffmpegProbe.exitCode !== 0) {
     throw new Error("ffmpeg が見つからないか、実行に失敗しました。");
@@ -119,7 +166,7 @@ export async function assertFfmpegAvailable(): Promise<{
     throw new Error("ffprobe が見つからないか、実行に失敗しました。");
   }
 
-  return { ffmpeg: "ffmpeg", ffprobe: "ffprobe" };
+  return { ffmpeg: ffmpegPath, ffprobe: ffprobePath };
 }
 
 type FfProbeJson = {
@@ -132,7 +179,8 @@ type FfProbeJson = {
 };
 
 export async function probeVideo(inputPath: string): Promise<ProbeInfo> {
-  const probe = await run("ffprobe", [
+  const ffprobePath = resolveFfprobePath();
+  const probe = await run(ffprobePath, [
     "-v",
     "error",
     "-print_format",
@@ -246,6 +294,16 @@ export async function restoreSpeedSameAsShell(params: {
   });
 }
 
+export async function runFfmpegCommand(
+  args: readonly string[],
+  opts?: {
+    totalDurationSec?: number;
+    onProgress?: ((p: ProgressInfo) => void) | undefined;
+  },
+): Promise<void> {
+  return ffmpegFailFast(args, opts);
+}
+
 export async function extractSegmentTimes(params: {
   inputPath: string;
   outputPath: string;
@@ -310,4 +368,54 @@ export async function concatViaDemuxer(params: {
     totalDurationSec: params.totalDurationSec,
     onProgress: params.onProgress,
   });
+}
+
+/** Generate horizontal filmstrip JPEG for timeline thumbnails. */
+export async function generateFilmstrip(params: {
+  inputPath: string;
+  outputPath: string;
+  durationSec: number;
+  frameCount?: number;
+  thumbWidth?: number;
+}): Promise<void> {
+  const frameCount = params.frameCount ?? Math.min(20, Math.max(1, Math.ceil(params.durationSec)));
+  const thumbWidth = params.thumbWidth ?? 160;
+  const interval = params.durationSec / frameCount;
+
+  await ffmpegFailFast([
+    "-y",
+    "-i",
+    params.inputPath,
+    "-vf",
+    `fps=1/${Math.max(interval, 0.5)},scale=${thumbWidth}:-1,tile=${frameCount}x1`,
+    "-frames:v",
+    "1",
+    "-q:v",
+    "5",
+    params.outputPath,
+  ]);
+}
+
+/** Still image to timed video segment for export. */
+export async function imageToVideoSegment(params: {
+  inputPath: string;
+  outputPath: string;
+  durationSec: number;
+}): Promise<void> {
+  await ffmpegFailFast([
+    "-y",
+    "-loop",
+    "1",
+    "-i",
+    params.inputPath,
+    "-t",
+    String(params.durationSec),
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    params.outputPath,
+  ], { totalDurationSec: params.durationSec });
 }

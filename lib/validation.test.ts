@@ -49,6 +49,15 @@ describe("assertPositiveNumber / assertPositiveInt", () => {
   });
 });
 
+describe("assertStrictFiniteNumber", () => {
+  it("requires typeof number", async () => {
+    const { assertStrictFiniteNumber } = await import("@/lib/validation");
+    expect(assertStrictFiniteNumber("x", 1)).toBe(1);
+    expect(() => assertStrictFiniteNumber("x", "1")).toThrow("有限の数値");
+    expect(() => assertStrictFiniteNumber("x", NaN)).toThrow();
+  });
+});
+
 describe("normalizeRanges", () => {
   it("配列が空または非配列だとエラー", () => {
     expect(() => normalizeRanges(10, [])).toThrow();

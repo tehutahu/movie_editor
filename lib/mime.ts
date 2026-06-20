@@ -15,6 +15,15 @@ export function guessVideoMimeType(filePath: string): string {
       return "video/x-flv";
     case "wmv":
       return "video/x-ms-wmv";
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
     default:
       return "application/octet-stream";
   }

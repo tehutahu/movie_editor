@@ -1,10 +1,21 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { JOBS_ROOT } from "@/lib/paths";
 
 export type JobStatus = "pending" | "running" | "done" | "error";
 
+export type JobKind =
+  | "restore"
+  | "export_segment"
+  | "export_clip"
+  | "merge_kept"
+  | "thumbnails"
+  | "export_composition";
+
 export type JobRecord = {
   id: string;
-  kind: "restore" | "export_segment" | "merge_kept";
+  kind: JobKind;
   status: JobStatus;
   createdAtMs: number;
   outputPath?: string | undefined;
@@ -13,19 +24,41 @@ export type JobRecord = {
   progressPct?: number | undefined;
   etaSec?: number | undefined;
   currentStep?: string | undefined;
+  assetId?: string | undefined;
 };
 
 const jobs = new Map<string, JobRecord>();
 
-export function createJobRecord(kind: JobRecord["kind"]): JobRecord {
+async function persistJob(rec: JobRecord): Promise<void> {
+  try {
+    const dir = path.join(JOBS_ROOT, rec.id);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "meta.json"), JSON.stringify(rec), "utf8");
+  } catch {
+    // best effort for serverless /tmp fallback
+  }
+}
+
+async function loadPersistedJob(jobId: string): Promise<JobRecord | null> {
+  try {
+    const raw = await readFile(path.join(JOBS_ROOT, jobId, "meta.json"), "utf8");
+    return JSON.parse(raw) as JobRecord;
+  } catch {
+    return null;
+  }
+}
+
+export function createJobRecord(kind: JobRecord["kind"], extra?: Partial<JobRecord>): JobRecord {
   const id = randomUUID();
   const rec: JobRecord = {
     id,
     kind,
     status: "pending",
     createdAtMs: Date.now(),
+    ...extra,
   };
   jobs.set(id, rec);
+  void persistJob(rec);
   return rec;
 }
 
@@ -33,10 +66,20 @@ export function getJobRecord(jobId: string): JobRecord | undefined {
   return jobs.get(jobId);
 }
 
+export async function ensureJobRecord(jobId: string): Promise<JobRecord | undefined> {
+  const mem = jobs.get(jobId);
+  if (mem) return mem;
+  const loaded = await loadPersistedJob(jobId);
+  if (loaded) jobs.set(jobId, loaded);
+  return loaded ?? undefined;
+}
+
 export function patchJobRecord(jobId: string, patch: Partial<JobRecord>): void {
   const cur = jobs.get(jobId);
   if (!cur) return;
-  jobs.set(jobId, { ...cur, ...patch });
+  const next = { ...cur, ...patch };
+  jobs.set(jobId, next);
+  void persistJob(next);
 }
 
 /** テストのみ: in-memory のジョブ一覧をクリアします。 */
