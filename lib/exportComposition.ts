@@ -19,6 +19,31 @@ import {
 import { writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 
+const MAX_FFMPEG_FILTER_INT = 100_000;
+
+/** Embed validated numbers in ffmpeg filter expressions (defense in depth). */
+export function formatFfmpegFilterNumber(value: number): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error("ffmpeg フィルタ数値が不正です。");
+  }
+  const rounded = Math.round(value * 1_000_000) / 1_000_000;
+  const s = String(rounded);
+  if (!/^-?\d+(\.\d+)?$/.test(s)) {
+    throw new Error("ffmpeg フィルタ数値の形式が不正です。");
+  }
+  return s;
+}
+
+function formatFfmpegFilterInt(value: number): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new Error("ffmpeg フィルタ整数が不正です。");
+  }
+  if (value < 0 || value > MAX_FFMPEG_FILTER_INT) {
+    throw new Error("ffmpeg フィルタ整数が範囲外です。");
+  }
+  return String(value);
+}
+
 type ExportClipInput = {
   clip: Clip;
   asset: Asset;
@@ -171,11 +196,13 @@ function buildCompositionVideoFilterGraph(prepared: readonly PreparedClip[]): st
     const p = prepared[i]!;
     const scaled = `vs${i}`;
     const out = i === prepared.length - 1 ? "vout" : `vo${i}`;
-    const start = p.clip.timelineStartSec;
-    const end = p.clip.timelineStartSec + p.clip.durationSec;
-    filters.push(`[${p.inputIndex}:v]scale=${p.rect.w}:${p.rect.h}[${scaled}]`);
+    const start = formatFfmpegFilterNumber(p.clip.timelineStartSec);
+    const end = formatFfmpegFilterNumber(p.clip.timelineStartSec + p.clip.durationSec);
     filters.push(
-      `[${currentV}][${scaled}]overlay=${p.rect.x}:${p.rect.y}:enable='between(t\\,${start}\\,${end})'[${out}]`,
+      `[${p.inputIndex}:v]scale=${formatFfmpegFilterInt(p.rect.w)}:${formatFfmpegFilterInt(p.rect.h)}[${scaled}]`,
+    );
+    filters.push(
+      `[${currentV}][${scaled}]overlay=${formatFfmpegFilterInt(p.rect.x)}:${formatFfmpegFilterInt(p.rect.y)}:enable='between(t\\,${start}\\,${end})'[${out}]`,
     );
     currentV = out;
   }
@@ -203,7 +230,7 @@ async function buildCompositionAudioFilterGraph(
     const probe = await probeVideo(p.path);
     if (!probe.hasAudio) continue;
     const label = `ad${p.inputIndex}`;
-    const delayMs = Math.round(p.clip.timelineStartSec * 1000);
+    const delayMs = formatFfmpegFilterInt(Math.round(p.clip.timelineStartSec * 1000));
     filters.push(`[${p.inputIndex}:a]adelay=${delayMs}|${delayMs}[${label}]`);
     audioLabels.push(`[${label}]`);
   }
@@ -249,7 +276,7 @@ export async function exportCompositionToFile(params: {
     "-f",
     "lavfi",
     "-i",
-    `color=c=${COMPOSITION_BG_FFMPEG}:s=${EXPORT_WIDTH}x${EXPORT_HEIGHT}:d=${duration}:r=${fps}`,
+    `color=c=${COMPOSITION_BG_FFMPEG}:s=${EXPORT_WIDTH}x${EXPORT_HEIGHT}:d=${formatFfmpegFilterNumber(duration)}:r=${fps}`,
   ];
   for (const p of prepared) {
     args.push("-i", p.path);
@@ -269,7 +296,7 @@ export async function exportCompositionToFile(params: {
     "-movflags",
     "+faststart",
     "-t",
-    String(duration),
+    String(formatFfmpegFilterNumber(duration)),
     outputPath,
   );
 

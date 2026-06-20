@@ -96,6 +96,24 @@ function assertFiniteNonNegative(label: string, value: unknown): number {
   return n;
 }
 
+/** JSON 由来の値が `number` 型であることを要求（ffmpeg フィルタ等への文字列注入防止）。 */
+export function assertStrictFiniteNumber(
+  label: string,
+  value: unknown,
+  opts: { min?: number; max?: number } = {},
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${label} は有限の数値である必要があります。`);
+  }
+  if (opts.min !== undefined && value < opts.min) {
+    throw new Error(`${label} は ${opts.min} 以上である必要があります。`);
+  }
+  if (opts.max !== undefined && value > opts.max) {
+    throw new Error(`${label} は ${opts.max} 以下である必要があります。`);
+  }
+  return value;
+}
+
 /** 入力区間 [{start,end}, ...] を検証して正規化（秒単位）。 */
 export function normalizeRanges(durationSec: number, raw: unknown): Range[] {
   if (!Array.isArray(raw) || raw.length === 0) {

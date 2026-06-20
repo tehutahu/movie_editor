@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildDownloadFilename, sanitizeExportBaseName } from "@/lib/exportName";
-import { exportCompositionToFile, type CompositionExportPayload } from "@/lib/exportComposition";
+import { exportCompositionToFile } from "@/lib/exportComposition";
+import { parseCompositionExportPayload } from "@/lib/editor/validateExportProject";
 import { assertFfmpegAvailable } from "@/lib/ffmpeg";
 import { createJobRecord, patchJobRecord, runDetached } from "@/lib/jobs";
 import { ensureJobDir, pruneJobsAfterComplete } from "@/lib/storage";
@@ -11,13 +12,15 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   try {
     await assertFfmpegAvailable();
-    const body = (await req.json()) as CompositionExportPayload & { exportBaseName?: string };
-
-    if (!body.clips?.length) {
-      return NextResponse.json({ error: "クリップがありません。" }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "JSON body が不正です。" }, { status: 400 });
     }
 
-    const baseName = sanitizeExportBaseName(body.exportBaseName ?? "project");
+    const parsed = parseCompositionExportPayload(body);
+    const baseName = sanitizeExportBaseName(parsed.exportBaseName ?? "project");
     const job = createJobRecord("export_composition");
     const jobDir = await ensureJobDir(job.id);
     const outputPath = path.join(jobDir, "output_composition.mp4");
@@ -26,15 +29,7 @@ export async function POST(req: Request) {
     runDetached(job.id, async () => {
       patchJobRecord(job.id, { currentStep: "export" });
       await exportCompositionToFile({
-        project: {
-          assets: body.assets ?? [],
-          tracks: body.tracks ?? [],
-          clips: body.clips,
-          compositionDurationSec: body.compositionDurationSec ?? 30,
-          playheadSec: 0,
-          selectedClipIds: [],
-          exportBaseName: baseName,
-        },
+        project: { ...parsed.project, exportBaseName: baseName },
         jobDir,
         outputPath,
         onProgress: (pct) => patchJobRecord(job.id, { progressPct: pct }),
@@ -47,7 +42,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
+      { status: 400 },
     );
   }
 }
