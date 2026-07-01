@@ -39,6 +39,30 @@ describe("parseCompositionExportPayload", () => {
     const parsed = parseCompositionExportPayload(validPayload());
     expect(parsed.project.clips).toHaveLength(1);
     expect(parsed.project.assets[0]?.streamUrl).toBe(`/api/assets/${assetId}/stream`);
+    expect(parsed.project.compositionWidth).toBe(1920);
+    expect(parsed.project.compositionHeight).toBe(1080);
+  });
+
+  it("defaults composition size when width/height are omitted", () => {
+    const parsed = parseCompositionExportPayload(validPayload());
+    expect(parsed.project.compositionWidth).toBe(1920);
+    expect(parsed.project.compositionHeight).toBe(1080);
+  });
+
+  it("accepts custom composition dimensions", () => {
+    const parsed = parseCompositionExportPayload(
+      validPayload({ compositionWidth: 1080, compositionHeight: 1920 }),
+    );
+    expect(parsed.project.compositionWidth).toBe(1080);
+    expect(parsed.project.compositionHeight).toBe(1920);
+  });
+
+  it("rejects odd composition dimensions", () => {
+    expect(() =>
+      parseCompositionExportPayload(
+        validPayload({ compositionWidth: 1081, compositionHeight: 1920 }),
+      ),
+    ).toThrow("偶数");
   });
 
   it("rejects filter injection via string durationSec", () => {

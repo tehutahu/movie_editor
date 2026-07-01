@@ -16,7 +16,7 @@ See [README.md](README.md) for user-facing setup and usage.
 | Timeline | Multi-track, drag/move, edge resize, split/merge/delete/duplicate, overlap resolution, zoom, filmstrip thumbnails (video) |
 | Preview | Canvas compositor (position/scale), playback controls, frame step, fullscreen, audio from top video track |
 | Editing | Undo/redo command history, resizable preview/timeline split (persisted in `localStorage`) |
-| Jobs | Speed restore, per-clip segment export, full composition export (1920×1080 mp4) |
+| Jobs | Speed restore, per-clip segment export, full composition export (variable resolution mp4) |
 | Storage | Local filesystem (default) or Vercel Blob |
 
 ## Not implemented (documented gaps)
@@ -28,7 +28,7 @@ Do not assume these exist when testing or extending the app:
 - **Track management** — add track only; no delete, reorder, mute, solo, or lock.
 - **Asset management** — no delete/rename in the NLE asset panel.
 - **Advanced editing** — no transitions, effects, text overlays, opacity, volume per clip, ripple/roll trim, copy/paste, or playhead/grid snapping (overlap snap on move only).
-- **Export options** — mp4 only; no custom resolution/frame-rate picker in UI.
+- **Export options** — mp4 only; composition resolution presets (16:9 / 9:16 / 1:1), auto-match on first clip placement, manual match-to-selected-clip; no custom width×height input or frame-rate picker. Clip media is still stretch-fit to transform rects (no letterbox for mixed aspect ratios).
 - **Auth / collaboration / cloud project files** — local single-user MVP.
 - **CI browser E2E** — Vitest unit tests only; ffmpeg not installed in CI.
 

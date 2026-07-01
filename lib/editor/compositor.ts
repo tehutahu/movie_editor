@@ -6,8 +6,55 @@ export const MIN_CLIP_SCALE = 0.2;
 export const MAX_CLIP_SCALE = 3;
 export const BASE_DRAW_WIDTH_RATIO = 0.5;
 export const BASE_DRAW_HEIGHT_RATIO = 0.5;
-export const EXPORT_WIDTH = 1920;
-export const EXPORT_HEIGHT = 1080;
+export const DEFAULT_COMPOSITION_WIDTH = 1920;
+export const DEFAULT_COMPOSITION_HEIGHT = 1080;
+/** @deprecated Use DEFAULT_COMPOSITION_WIDTH */
+export const EXPORT_WIDTH = DEFAULT_COMPOSITION_WIDTH;
+/** @deprecated Use DEFAULT_COMPOSITION_HEIGHT */
+export const EXPORT_HEIGHT = DEFAULT_COMPOSITION_HEIGHT;
+
+export const MIN_COMPOSITION_DIMENSION = 320;
+export const MAX_COMPOSITION_DIMENSION = 4096;
+
+function evenDimension(n: number): number {
+  return Math.max(MIN_COMPOSITION_DIMENSION, Math.min(MAX_COMPOSITION_DIMENSION, Math.round(n / 2) * 2));
+}
+
+export function getCompositionSize(project: EditorProject): { width: number; height: number } {
+  return {
+    width: project.compositionWidth,
+    height: project.compositionHeight,
+  };
+}
+
+export function compositionSizeFromAsset(
+  assetWidth: number,
+  assetHeight: number,
+  maxLongEdge = DEFAULT_COMPOSITION_WIDTH,
+): { width: number; height: number } {
+  if (assetWidth < 1 || assetHeight < 1) {
+    return {
+      width: DEFAULT_COMPOSITION_WIDTH,
+      height: DEFAULT_COMPOSITION_HEIGHT,
+    };
+  }
+  const longEdge = Math.max(assetWidth, assetHeight);
+  const scale = maxLongEdge / longEdge;
+  return {
+    width: evenDimension(assetWidth * scale),
+    height: evenDimension(assetHeight * scale),
+  };
+}
+
+export function compositionSizeForFirstClip(
+  project: EditorProject,
+  asset: Asset,
+): { compositionWidth: number; compositionHeight: number } | null {
+  if (project.clips.length > 0) return null;
+  if (!asset.width || !asset.height) return null;
+  const { width, height } = compositionSizeFromAsset(asset.width, asset.height);
+  return { compositionWidth: width, compositionHeight: height };
+}
 export const COMPOSITION_BG_RGB = { r: 10, g: 12, b: 16 } as const;
 export const COMPOSITION_BG_CSS = "#0a0c10";
 export const COMPOSITION_BG_FFMPEG = "0x0a0c10";

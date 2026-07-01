@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   clipContainsNormPoint,
   clipsForExportComposition,
+  compositionSizeForFirstClip,
+  compositionSizeFromAsset,
+  DEFAULT_COMPOSITION_HEIGHT,
+  DEFAULT_COMPOSITION_WIDTH,
   EXPORT_HEIGHT,
   EXPORT_WIDTH,
   fitClipTransformToCanvas,
@@ -10,7 +14,7 @@ import {
   transformFromResize,
   transformToPixelRect,
 } from "@/lib/editor/compositor";
-import { DEFAULT_TRANSFORM } from "@/lib/editor/types";
+import { DEFAULT_TRANSFORM, type Asset } from "@/lib/editor/types";
 import { createEmptyProject } from "@/lib/editor/project";
 
 describe("compositor transform helpers", () => {
@@ -104,5 +108,88 @@ describe("compositor transform helpers", () => {
 
     const layers = clipsForExportComposition(project);
     expect(layers.map((l) => l.clip.id)).toEqual(["bg", "fg"]);
+  });
+});
+
+describe("compositionSizeFromAsset", () => {
+  it("scales landscape 4K down to 1920 long edge", () => {
+    const size = compositionSizeFromAsset(3840, 2160);
+    expect(size.width).toBe(1920);
+    expect(size.height).toBe(1080);
+  });
+
+  it("preserves portrait aspect with 1920 long edge", () => {
+    const size = compositionSizeFromAsset(1080, 1920);
+    expect(size.width).toBe(1080);
+    expect(size.height).toBe(1920);
+  });
+
+  it("handles square assets", () => {
+    const size = compositionSizeFromAsset(2000, 2000);
+    expect(size.width).toBe(1920);
+    expect(size.height).toBe(1920);
+  });
+
+  it("returns even dimensions", () => {
+    const size = compositionSizeFromAsset(1001, 1779);
+    expect(size.width % 2).toBe(0);
+    expect(size.height % 2).toBe(0);
+  });
+
+  it("falls back to default for invalid asset dimensions", () => {
+    const size = compositionSizeFromAsset(0, 1920);
+    expect(size.width).toBe(DEFAULT_COMPOSITION_WIDTH);
+    expect(size.height).toBe(DEFAULT_COMPOSITION_HEIGHT);
+  });
+});
+
+describe("compositionSizeForFirstClip", () => {
+  const portraitAsset: Asset = {
+    id: "a1",
+    kind: "video",
+    streamUrl: "/a1",
+    displayName: "portrait.mp4",
+    ext: "mp4",
+    width: 1080,
+    height: 1920,
+  };
+
+  it("returns size when timeline is empty and asset has dimensions", () => {
+    const project = createEmptyProject();
+    expect(compositionSizeForFirstClip(project, portraitAsset)).toEqual({
+      compositionWidth: 1080,
+      compositionHeight: 1920,
+    });
+  });
+
+  it("returns null when clips already exist", () => {
+    let project = createEmptyProject();
+    const track = project.tracks[0]!;
+    project = {
+      ...project,
+      clips: [
+        {
+          id: "c1",
+          trackId: track.id,
+          timelineStartSec: 0,
+          durationSec: 5,
+          parts: [{ assetId: "a1", sourceInSec: 0, sourceOutSec: 5 }],
+          transform: DEFAULT_TRANSFORM,
+        },
+      ],
+    };
+    expect(compositionSizeForFirstClip(project, portraitAsset)).toBeNull();
+  });
+
+  it("returns null when asset dimensions are missing", () => {
+    const project = createEmptyProject();
+    const asset: Asset = {
+      id: "a2",
+      kind: "video",
+      streamUrl: "/a2",
+      displayName: "unknown.mp4",
+      ext: "mp4",
+    };
+    expect(compositionSizeForFirstClip(project, asset)).toBeNull();
   });
 });

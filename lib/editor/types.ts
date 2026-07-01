@@ -46,6 +46,8 @@ export type EditorProject = {
   tracks: Track[];
   clips: Clip[];
   compositionDurationSec: number;
+  compositionWidth: number;
+  compositionHeight: number;
   playheadSec: number;
   selectedClipIds: string[];
   exportBaseName: string;

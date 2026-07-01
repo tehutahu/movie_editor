@@ -24,8 +24,28 @@ function readStoredWorkspaceHeight(): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+const COMPOSITION_PRESETS = [
+  { id: "16:9", label: "1920×1080 (16:9)", width: 1920, height: 1080 },
+  { id: "9:16", label: "1080×1920 (9:16)", width: 1080, height: 1920 },
+  { id: "1:1", label: "1080×1080 (1:1)", width: 1080, height: 1080 },
+] as const;
+
+function compositionPresetId(width: number, height: number): string {
+  const match = COMPOSITION_PRESETS.find((p) => p.width === width && p.height === height);
+  return match?.id ?? "custom";
+}
+
 export function EditorShell({ editor }: { editor: EditorStore }) {
-  const { project, setExportBaseName, busy, error, liveJob, jobPhase } = editor;
+  const {
+    project,
+    setExportBaseName,
+    setCompositionSize,
+    matchCompositionToSelectedClip,
+    busy,
+    error,
+    liveJob,
+    jobPhase,
+  } = editor;
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [workspaceHeightPx, setWorkspaceHeightPx] = useState<number | null>(null);
   const workspaceHeightRef = useRef<number | null>(null);
@@ -125,15 +145,52 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
           <div className="editor-top-row">
             <AssetLibraryPanel editor={editor} />
             <div className="editor-center-col">
-              <div className="editor-project-name">
-                <label htmlFor="export-base-name">プロジェクト名</label>
-                <input
-                  id="export-base-name"
-                  type="text"
-                  value={project.exportBaseName}
-                  disabled={Boolean(busy)}
-                  onChange={(e) => setExportBaseName(e.target.value)}
-                />
+              <div className="editor-project-bar">
+                <div className="editor-project-name">
+                  <label htmlFor="export-base-name">プロジェクト名</label>
+                  <input
+                    id="export-base-name"
+                    type="text"
+                    value={project.exportBaseName}
+                    disabled={Boolean(busy)}
+                    onChange={(e) => setExportBaseName(e.target.value)}
+                  />
+                </div>
+                <div className="editor-composition-size">
+                  <label htmlFor="composition-preset">合成解像度</label>
+                  <span className="composition-size-value">
+                    {project.compositionWidth} × {project.compositionHeight}
+                  </span>
+                  <select
+                    id="composition-preset"
+                    value={compositionPresetId(project.compositionWidth, project.compositionHeight)}
+                    disabled={Boolean(busy)}
+                    onChange={(e) => {
+                      const preset = COMPOSITION_PRESETS.find((p) => p.id === e.target.value);
+                      if (preset) setCompositionSize(preset.width, preset.height);
+                    }}
+                  >
+                    {COMPOSITION_PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                    {compositionPresetId(project.compositionWidth, project.compositionHeight) ===
+                    "custom" ? (
+                      <option value="custom">
+                        {project.compositionWidth}×{project.compositionHeight} (カスタム)
+                      </option>
+                    ) : null}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={Boolean(busy) || project.selectedClipIds.length === 0}
+                    onClick={() => matchCompositionToSelectedClip()}
+                    title="選択中クリップの素材解像度に合わせる"
+                  >
+                    素材に合わせる
+                  </button>
+                </div>
               </div>
               <CompositorPreview editor={editor} />
             </div>

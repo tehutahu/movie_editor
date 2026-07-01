@@ -23,12 +23,18 @@ import {
   type CommandHistory,
 } from "@/lib/editor/commandHistory";
 import type { EditorCommand } from "@/lib/editor/commands";
+import { applyCommand } from "@/lib/editor/commands";
 import {
   clipFromAsset,
   computeCompositionDuration,
   createEmptyProject,
+  findAsset,
 } from "@/lib/editor/project";
-import { fitClipTransformToCanvas } from "@/lib/editor/compositor";
+import {
+  compositionSizeForFirstClip,
+  compositionSizeFromAsset,
+  fitClipTransformToCanvas,
+} from "@/lib/editor/compositor";
 import type { AppliedJobStep, Asset, ClipTransform, EditorProject } from "@/lib/editor/types";
 
 type JobPollInfo = {
@@ -225,7 +231,11 @@ export function useEditorStore() {
           timelineStartSec: startSec,
           tracks: cur.tracks,
         });
-        return dispatchCommand(h, { type: "addClip", clip })?.history ?? h;
+        const sizePatch = compositionSizeForFirstClip(cur, asset);
+        const base = sizePatch ? { ...cur, ...sizePatch } : cur;
+        const next = applyCommand(base, { type: "addClip", clip });
+        if (!next) return h;
+        return { undoStack: [...h.undoStack, next], redoStack: [] };
       });
     },
     [],
@@ -318,6 +328,47 @@ export function useEditorStore() {
         clips: cur.clips.map((c) =>
           ids.has(c.id) ? { ...c, transform: { ...fit } } : c,
         ),
+      };
+      return { undoStack: [...h.undoStack, next], redoStack: [] };
+    });
+  }, []);
+
+  const setCompositionSize = useCallback((width: number, height: number) => {
+    setHistory((h) => {
+      const cur = getCurrentProject(h);
+      if (cur.compositionWidth === width && cur.compositionHeight === height) return h;
+      const next: EditorProject = { ...cur, compositionWidth: width, compositionHeight: height };
+      return { undoStack: [...h.undoStack, next], redoStack: [] };
+    });
+  }, []);
+
+  const matchCompositionToSelectedClip = useCallback(() => {
+    setError(null);
+    setHistory((h) => {
+      const cur = getCurrentProject(h);
+      const selectedId = cur.selectedClipIds[0];
+      if (!selectedId) {
+        setError("素材に合わせるクリップを選択してください。");
+        return h;
+      }
+      const clip = cur.clips.find((c) => c.id === selectedId);
+      if (!clip) return h;
+      const asset = findAsset(cur.assets, clip.parts[0]?.assetId ?? "");
+      if (!asset?.width || !asset?.height) {
+        setError("選択クリップの素材解像度が不明です。");
+        return h;
+      }
+      const size = compositionSizeFromAsset(asset.width, asset.height);
+      if (
+        cur.compositionWidth === size.width &&
+        cur.compositionHeight === size.height
+      ) {
+        return h;
+      }
+      const next: EditorProject = {
+        ...cur,
+        compositionWidth: size.width,
+        compositionHeight: size.height,
       };
       return { undoStack: [...h.undoStack, next], redoStack: [] };
     });
@@ -501,6 +552,8 @@ export function useEditorStore() {
           tracks: cur.tracks,
           clips: cur.clips,
           compositionDurationSec: cur.compositionDurationSec,
+          compositionWidth: cur.compositionWidth,
+          compositionHeight: cur.compositionHeight,
           exportBaseName: sanitizeExportBaseName(cur.exportBaseName),
         }),
       });
@@ -634,6 +687,8 @@ export function useEditorStore() {
     resizeClipDuration,
     updateClipTransform,
     fitSelectedClipsToCanvas,
+    setCompositionSize,
+    matchCompositionToSelectedClip,
     downloadSelectedClip,
     exportSelectedClips,
     restoreSpeedForSelected,

@@ -1,4 +1,8 @@
 import {
+  DEFAULT_COMPOSITION_HEIGHT,
+  DEFAULT_COMPOSITION_WIDTH,
+  MAX_COMPOSITION_DIMENSION,
+  MIN_COMPOSITION_DIMENSION,
   MAX_CLIP_SCALE,
   MIN_CLIP_SCALE,
 } from "@/lib/editor/compositor";
@@ -16,6 +20,24 @@ export const MAX_COMPOSITION_EXPORT_ASSETS = 50;
 export const MAX_COMPOSITION_EXPORT_TRACKS = 20;
 export const MAX_CLIP_PARTS = 50;
 export const MAX_COMPOSITION_DURATION_SEC = 24 * 60 * 60;
+
+function parseCompositionDimension(
+  label: string,
+  value: unknown,
+  fallback: number,
+): number {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  const n = assertStrictFiniteNumber(label, value, {
+    min: MIN_COMPOSITION_DIMENSION,
+    max: MAX_COMPOSITION_DIMENSION,
+  });
+  if (n % 2 !== 0) {
+    throw new Error(`${label} は偶数である必要があります。`);
+  }
+  return n;
+}
 
 function assertRecord(label: string, value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -177,6 +199,17 @@ export function parseCompositionExportPayload(raw: unknown): ParsedCompositionEx
     { min: MIN_CLIP_DURATION_SEC, max: MAX_COMPOSITION_DURATION_SEC },
   );
 
+  const compositionWidth = parseCompositionDimension(
+    "compositionWidth",
+    body.compositionWidth,
+    DEFAULT_COMPOSITION_WIDTH,
+  );
+  const compositionHeight = parseCompositionDimension(
+    "compositionHeight",
+    body.compositionHeight,
+    DEFAULT_COMPOSITION_HEIGHT,
+  );
+
   if (!Array.isArray(body.assets)) {
     throw new Error("assets は配列である必要があります。");
   }
@@ -223,6 +256,8 @@ export function parseCompositionExportPayload(raw: unknown): ParsedCompositionEx
       tracks,
       clips,
       compositionDurationSec,
+      compositionWidth,
+      compositionHeight,
       playheadSec: 0,
       selectedClipIds: [],
       exportBaseName: exportBaseName ?? "project",
