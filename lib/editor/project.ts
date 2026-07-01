@@ -14,6 +14,8 @@ export function createEmptyProject(): EditorProject {
     tracks: createDefaultTracks(),
     clips: [],
     compositionDurationSec: 30,
+    compositionWidth: 1920,
+    compositionHeight: 1080,
     playheadSec: 0,
     selectedClipIds: [],
     exportBaseName: "project",

@@ -368,7 +368,11 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     const availH = container.clientHeight;
     if (availW < 1 || availH < 1) return;
 
-    const aspect = 16 / 9;
+    const proj = projectRef.current;
+    const aspect =
+      proj.compositionWidth > 0 && proj.compositionHeight > 0
+        ? proj.compositionWidth / proj.compositionHeight
+        : 16 / 9;
     let w = availW;
     let h = w / aspect;
     if (h > availH) {
@@ -389,7 +393,6 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const proj = projectRef.current;
     const preview = transformPreviewRef.current;
 
     const layers = resolveActiveClipsAtPlayhead(proj, proj.playheadSec);

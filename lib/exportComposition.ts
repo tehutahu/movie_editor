@@ -3,8 +3,7 @@ import { resolveAssetInputPath } from "@/lib/assetResolve";
 import {
   clipsForExportComposition,
   COMPOSITION_BG_FFMPEG,
-  EXPORT_HEIGHT,
-  EXPORT_WIDTH,
+  getCompositionSize,
   resolveAudioTrackForExport,
   transformToPixelRect,
 } from "@/lib/editor/compositor";
@@ -155,6 +154,8 @@ async function renderClipToPart(
 async function prepareCompositionClips(
   project: EditorProject,
   jobDir: string,
+  compW: number,
+  compH: number,
 ): Promise<PreparedClip[]> {
   const sorted = clipsForExportComposition(project);
   const prepared: PreparedClip[] = [];
@@ -176,7 +177,7 @@ async function prepareCompositionClips(
       clip,
       asset,
       inputIndex: prepared.length + 1,
-      rect: transformToPixelRect(clip.transform, EXPORT_WIDTH, EXPORT_HEIGHT),
+      rect: transformToPixelRect(clip.transform, compW, compH),
     });
   }
 
@@ -248,7 +249,7 @@ async function buildCompositionAudioFilterGraph(
   return { filterPart: filters.join(";"), audioMapLabel: "[aout]" };
 }
 
-/** Export full composition as single MP4 with preview-matched layout on a fixed canvas. */
+/** Export full composition as single MP4 with preview-matched layout on the project canvas. */
 export async function exportCompositionToFile(params: {
   project: EditorProject;
   jobDir: string;
@@ -256,10 +257,11 @@ export async function exportCompositionToFile(params: {
   onProgress?: (pct: number) => void;
 }): Promise<void> {
   const { project, jobDir, outputPath } = params;
+  const { width: compW, height: compH } = getCompositionSize(project);
   const duration = project.compositionDurationSec;
   const fps = 30;
 
-  const prepared = await prepareCompositionClips(project, jobDir);
+  const prepared = await prepareCompositionClips(project, jobDir, compW, compH);
   if (prepared.length === 0) {
     throw new Error("書き出すクリップがありません。");
   }
@@ -276,7 +278,7 @@ export async function exportCompositionToFile(params: {
     "-f",
     "lavfi",
     "-i",
-    `color=c=${COMPOSITION_BG_FFMPEG}:s=${EXPORT_WIDTH}x${EXPORT_HEIGHT}:d=${formatFfmpegFilterNumber(duration)}:r=${fps}`,
+    `color=c=${COMPOSITION_BG_FFMPEG}:s=${compW}x${compH}:d=${formatFfmpegFilterNumber(duration)}:r=${fps}`,
   ];
   for (const p of prepared) {
     args.push("-i", p.path);
@@ -319,5 +321,7 @@ export type CompositionExportPayload = {
   tracks: Track[];
   clips: Clip[];
   compositionDurationSec: number;
+  compositionWidth?: number;
+  compositionHeight?: number;
   exportBaseName?: string;
 };
