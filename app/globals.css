@@ -923,6 +923,22 @@ button.primary {
   margin-bottom: 8px;
 }
 
+.storage-release {
+  align-self: flex-start;
+  background: transparent;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+
+.storage-notice {
+  color: #f5d68a;
+  padding: 8px 12px;
+  border: 1px solid rgba(245, 214, 138, 0.4);
+  border-radius: 8px;
+  margin: 0 0 8px;
+}
+
 .busy-banner {
   color: #c8d9ff;
   padding: 8px 12px;

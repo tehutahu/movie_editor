@@ -1,9 +1,10 @@
+import { StorageRetentionError } from "@/lib/storageRetention";
 import { NextResponse } from "next/server";
 import { buildDownloadFilename, sanitizeExportBaseName } from "@/lib/exportName";
 import { exportCompositionToFile } from "@/lib/exportComposition";
 import { parseCompositionExportPayload } from "@/lib/editor/validateExportProject";
 import { assertFfmpegAvailable } from "@/lib/ffmpeg";
-import { createJobRecord, patchJobRecord, runDetached } from "@/lib/jobs";
+import { createRetainedJobRecord, patchJobRecord, runDetached } from "@/lib/jobs";
 import { ensureJobDir, pruneJobsAfterComplete } from "@/lib/storage";
 import path from "node:path";
 
@@ -21,7 +22,10 @@ export async function POST(req: Request) {
 
     const parsed = parseCompositionExportPayload(body);
     const baseName = sanitizeExportBaseName(parsed.exportBaseName ?? "project");
-    const job = createJobRecord("export_composition");
+    const sessionId = (body as { editorSessionId?: string }).editorSessionId;
+    const job = await createRetainedJobRecord("export_composition", {
+      sessionId, dependencies: parsed.project.assets.flatMap(a => [a.id, ...(a.sourceJobId ? [a.sourceJobId] : [])]),
+    });
     const jobDir = await ensureJobDir(job.id);
     const outputPath = path.join(jobDir, "output_composition.mp4");
     const downloadName = buildDownloadFilename(baseName, "export", "mp4");
@@ -42,7 +46,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
-      { status: 400 },
+      { status: e instanceof StorageRetentionError ? e.status : 400 },
     );
   }
 }

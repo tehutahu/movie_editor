@@ -173,6 +173,11 @@ function parseClip(
   }
 
   const parts = o.parts.map((part, pi) => parseClipPart(part, pi, assetIds));
+  const partsDuration = parts.reduce((sum, p) => sum + p.sourceOutSec - p.sourceInSec, 0);
+  if (Math.abs(partsDuration - durationSec) > 1e-6) {
+    throw new Error(`clips[${index}] の parts と durationSec が一致しません。`);
+  }
+
 
   return {
     id: assertStorageId(`clips[${index}].id`, String(o.id ?? "")),

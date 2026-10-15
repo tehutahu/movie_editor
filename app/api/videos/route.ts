@@ -1,3 +1,4 @@
+import { reserveStorage, finishStorageJob, cancelStorageReservations, StorageRetentionError } from "@/lib/storageRetention";
 import { NextResponse } from "next/server";
 import { displayNameFromOriginalFilename } from "@/lib/exportName";
 import {
@@ -16,6 +17,7 @@ export const runtime = "nodejs";
 
 /** 単一ファイルを `storage/uploads/<videoId>/input.<ext>` に保存します。 */
 export async function POST(req: Request) {
+  let reservedId: string | undefined;
   try {
     await ensureStorageTrees();
 
@@ -48,16 +50,22 @@ export async function POST(req: Request) {
 
     const buf = new Uint8Array(await file.arrayBuffer());
     const videoId = newVideoId();
+    const session = form.get("editorSessionId");
+    await reserveStorage([{ id: videoId, kind: "uploads", active: true }], typeof session === "string" ? session : undefined);
+    reservedId = videoId;
     await saveUploadedVideo({ videoId, ext, bytes: buf });
     const displayName = displayNameFromOriginalFilename(file.name);
     await saveUploadDisplayName(videoId, displayName);
+    await finishStorageJob(videoId);
+    reservedId = undefined;
     await pruneUploadsAfterSave(videoId);
 
     return NextResponse.json({ videoId, originalName: file.name, displayName, ext });
   } catch (e) {
+    if (reservedId) await cancelStorageReservations([reservedId]).catch(() => undefined);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
+      { status: e instanceof StorageRetentionError ? e.status : 500 },
     );
   }
 }

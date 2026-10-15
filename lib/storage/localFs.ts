@@ -98,12 +98,12 @@ export async function ensureJobDir(jobId: string): Promise<string> {
   return dir;
 }
 
-/** アップロード直後に古い uploads を整理（新規 `videoId` は保護）。 */
+/** Collect only explicitly released resources; protect the response asset. */
 export async function pruneUploadsAfterSave(videoId: string): Promise<void> {
   await pruneUploadStorage([videoId]);
 }
 
-/** ジョブ完了後に古い jobs を整理（当該 `jobId` と進行中ジョブは保護）。 */
+/** Running jobs and editing sessions retain their outputs and dependencies. */
 export async function pruneJobsAfterComplete(jobId: string): Promise<void> {
   await pruneJobsStorage([jobId]);
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { pruneAllStorage } from "@/lib/storageRetention";
+import { StorageRetentionError, pruneAllStorage } from "@/lib/storageRetention";
 import { ensureStorageTrees } from "@/lib/storage";
 
 export const runtime = "nodejs";
@@ -8,7 +8,7 @@ type Body = {
   keepIds?: unknown;
 };
 
-/** クライアントが保持したい upload / job ID を指定してストレージを整理します。 */
+/** Collect only resources whose owners explicitly ended editing. Unknown ownership stays protected. */
 export async function POST(req: Request) {
   try {
     await ensureStorageTrees();
@@ -30,11 +30,12 @@ export async function POST(req: Request) {
       ok: true,
       uploadsRemoved: result.uploadsRemoved,
       jobsRemoved: result.jobsRemoved,
+      warning: result.warning,
     });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
+      { status: e instanceof StorageRetentionError ? e.status : 500 },
     );
   }
 }
