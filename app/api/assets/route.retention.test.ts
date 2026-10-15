@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { UPLOADS_ROOT } from "@/lib/paths";
-vi.mock("@/lib/ffmpeg", () => ({ assertFfmpegAvailable: async () => undefined, probeVideo: vi.fn(async () => ({ durationSec: 1,width:320,height:320 })) }));
+vi.mock("@/lib/ffmpeg", () => ({ assertFfmpegAvailable: async () => undefined, probeVideo: vi.fn(async () => ({ durationSec: 1,width:320,height:320 })), probeImage: vi.fn(async () => ({ width:320,height:320,hasVideo:true })) }));
 import { POST } from "./route";
 import { releaseStorageSession, pruneAllStorage } from "@/lib/storageRetention";
 const sessions: string[]=[];

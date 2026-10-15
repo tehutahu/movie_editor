@@ -17,7 +17,7 @@ export function selectedClipExportRequest(project: EditorProject, clip: Clip) {
   const exportBaseName = sanitizeExportBaseName(project.exportBaseName);
   if (clip.parts.length === 1 && first.kind === "video") {
     return { url: "/api/jobs/export-segment", body: {
-      videoId: first.id, sourceJobId: first.sourceJobId,
+      videoId: first.storageAssetId ?? first.id, sourceJobId: first.sourceJobId,
       startSec: part.sourceInSec, endSec: part.sourceOutSec, exportBaseName,
     } };
   }

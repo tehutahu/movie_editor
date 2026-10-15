@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, open, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { reserveStorage, finishStorageJob, pruneAllStorage, type StorageReservation } from "@/lib/storageRetention";
+import { assertJobOutputFile } from "@/lib/pathGuard";
+import { assertStorageId } from "@/lib/validation";
 import { JOBS_ROOT } from "@/lib/paths";
 
 export type JobStatus = "pending" | "running" | "done" | "error";
@@ -136,4 +138,54 @@ export function runDetached(jobId: string, fn: () => Promise<void>): void {
       catch { /* fail closed: durable active state remains protected */ }
     }
   })();
+}
+
+/** A saved project must not depend on best-effort or still-queued job metadata. */
+export async function persistCompletedJobForProject(
+  jobId: string,
+): Promise<void> {
+  assertStorageId("jobId", jobId);
+  const pending = (writes.get(jobId) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(async () => {
+      const record = await ensureJobRecord(jobId);
+      if (
+        !record ||
+        record.id !== jobId ||
+        record.status !== "done" ||
+        !record.outputPath
+      ) {
+        throw new Error("保存対象のジョブが完了していません。");
+      }
+      assertJobOutputFile(jobId, record.outputPath);
+      const dir = path.join(JOBS_ROOT, jobId);
+      const tmp = path.join(dir, `.project-meta-${randomUUID()}.tmp`);
+      try {
+        const file = await open(tmp, "wx");
+        try {
+          await file.writeFile(JSON.stringify(record), "utf8");
+          await file.sync();
+        } finally {
+          await file.close();
+        }
+        await rename(tmp, path.join(dir, "meta.json"));
+        const directory = await open(dir, "r");
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
+      } catch {
+        await rm(tmp, { force: true }).catch(() => undefined);
+        throw new Error(
+          "ジョブ情報を永続化できません。プロジェクトの保存・読み込みを中止しました。",
+        );
+      }
+    });
+  // Other job writers may continue after a failed attempt; the caller still gets the failure.
+  writes.set(
+    jobId,
+    pending.catch(() => undefined),
+  );
+  await pending;
 }

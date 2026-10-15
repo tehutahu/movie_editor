@@ -170,7 +170,7 @@ export async function assertFfmpegAvailable(): Promise<{
 }
 
 type FfProbeJson = {
-  format?: { duration?: string };
+  format?: { duration?: string; format_name?: string };
   streams?: {
     codec_type?: string;
     width?: number;
@@ -178,7 +178,7 @@ type FfProbeJson = {
   }[];
 };
 
-export async function probeVideo(inputPath: string): Promise<ProbeInfo> {
+async function probeMedia(inputPath: string): Promise<FfProbeJson> {
   const ffprobePath = resolveFfprobePath();
   const probe = await run(ffprobePath, [
     "-v",
@@ -196,12 +196,34 @@ export async function probeVideo(inputPath: string): Promise<ProbeInfo> {
     );
   }
 
-  let json: FfProbeJson;
   try {
-    json = JSON.parse(probe.stdout) as FfProbeJson;
+    return JSON.parse(probe.stdout) as FfProbeJson;
   } catch {
     throw new Error("ffprobe のJSON解析に失敗しました。");
   }
+}
+
+/** Still images have no container duration; validate their decoded dimensions. */
+export async function probeImage(inputPath: string): Promise<{
+  width: number;
+  height: number;
+  hasVideo: true;
+}> {
+  const json = await probeMedia(inputPath);
+  const imageFormats = new Set(["png_pipe", "jpeg_pipe", "webp_pipe", "gif", "apng", "image2", "image2pipe"]);
+  if (!json.format?.format_name?.split(",").some((format) => imageFormats.has(format))) {
+    throw new Error("素材が対応する画像形式ではありません。");
+  }
+  const video = json.streams?.find((s) => s.codec_type === "video");
+  if (!video || !Number.isInteger(video.width) || !Number.isInteger(video.height) ||
+      video.width! <= 0 || video.height! <= 0) {
+    throw new Error("画像の解像度が取得できませんでした。");
+  }
+  return { width: video.width!, height: video.height!, hasVideo: true };
+}
+
+export async function probeVideo(inputPath: string): Promise<ProbeInfo> {
+  const json = await probeMedia(inputPath);
 
   const durationRaw = Number(json.format?.duration ?? NaN);
   if (!Number.isFinite(durationRaw) || durationRaw <= 0) {

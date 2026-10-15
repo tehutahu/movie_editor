@@ -3,6 +3,8 @@ export type AssetKind = "video" | "image";
 export type Asset = {
   id: string;
   kind: AssetKind;
+  /** Physical upload reference, distinct from the logical editor ID. */
+  storageAssetId?: string;
   /** Stream URL for preview / export */
   streamUrl: string;
   /** 速度復元などで参照するジョブ成果（未設定時はアップロード原本） */

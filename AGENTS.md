@@ -18,12 +18,13 @@ See [README.md](README.md) for user-facing setup and usage.
 | Editing | Undo/redo command history, resizable preview/timeline split (persisted in `localStorage`) |
 | Jobs | Speed restore, per-clip segment export, full composition export (variable resolution mp4) |
 | Storage | Local filesystem (default) or Vercel Blob |
+| Projects | Explicit immutable local save versions, JSON download/import, exact-byte media relink, durable saved-media protection |
 
 ## Not implemented (documented gaps)
 
 Do not assume these exist when testing or extending the app:
 
-- **Project persistence** — timeline state lives in memory; refresh clears edits (except split-pane height).
+- **Project persistence extensions** — no autosave, bundled media ZIP, collaboration, or Blob resume guarantee. Local explicit versioned save/load is implemented.
 - **merge-kept UI** — `POST /api/jobs/merge-kept` works but is only wired in the legacy editor, not the NLE.
 - **Track management** — add track only; no delete, reorder, mute, solo, or lock.
 - **Asset management** — no delete/rename in the NLE asset panel.
@@ -46,6 +47,8 @@ hooks/
   useEditorStore.ts       → NLE state, jobs, keyboard shortcuts
   legacy/useEditorState.ts → legacy segment editor (unused)
 lib/editor/               → project model, clip ops, compositor, commands
+lib/projectStorage.ts     → atomic save/load, SHA-256 validation, candidate protection
+lib/editor/projectDocument.ts → versioned persistence DTO and bounded validation
 lib/storage/              → media storage driver + local filesystem helpers
 lib/legacy/               → segment model for legacy editor
 lib/exportComposition.ts  → ffmpeg composition export pipeline

@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     const baseName = sanitizeExportBaseName(parsed.exportBaseName ?? "project");
     const sessionId = (body as { editorSessionId?: string }).editorSessionId;
     const job = await createRetainedJobRecord("export_composition", {
-      sessionId, dependencies: parsed.project.assets.flatMap(a => [a.id, ...(a.sourceJobId ? [a.sourceJobId] : [])]),
+      sessionId, dependencies: parsed.project.assets.flatMap(a => [a.storageAssetId ?? a.id, ...(a.sourceJobId ? [a.sourceJobId] : [])]),
     });
     const jobDir = await ensureJobDir(job.id);
     const outputPath = path.join(jobDir, "output_composition.mp4");

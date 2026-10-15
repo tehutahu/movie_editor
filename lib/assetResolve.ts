@@ -4,13 +4,14 @@ import { assertStorageId } from "@/lib/validation";
 
 export type AssetInputRef = {
   id: string;
+  storageAssetId?: string;
   sourceJobId?: string | undefined;
 };
 
 export async function resolveAssetInputPath(
   ref: string | AssetInputRef,
 ): Promise<string | null> {
-  const assetId = typeof ref === "string" ? ref : ref.id;
+  const assetId = typeof ref === "string" ? ref : (ref.storageAssetId ?? ref.id);
   assertStorageId("assetId", assetId);
 
   const sourceJobId = typeof ref === "string" ? undefined : ref.sourceJobId;

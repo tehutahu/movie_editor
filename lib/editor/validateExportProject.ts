@@ -46,7 +46,7 @@ function assertRecord(label: string, value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function parseAsset(raw: unknown, index: number): Asset {
+export function parseAsset(raw: unknown, index: number): Asset {
   const o = assertRecord(`assets[${index}]`, raw);
   const id = assertStorageId(`assets[${index}].id`, String(o.id ?? ""));
   const kind = o.kind;
@@ -75,6 +75,7 @@ function parseAsset(raw: unknown, index: number): Asset {
     displayName,
     streamUrl: `/api/assets/${id}/stream`,
     sourceJobId,
+    ...(o.storageAssetId === undefined ? {} : { storageAssetId: assertStorageId("storageAssetId", String(o.storageAssetId)) }),
   };
 
   if (o.sourceDurationSec !== undefined) {
@@ -94,7 +95,7 @@ function parseAsset(raw: unknown, index: number): Asset {
   return asset;
 }
 
-function parseTrack(raw: unknown, index: number): Track {
+export function parseTrack(raw: unknown, index: number): Track {
   const o = assertRecord(`tracks[${index}]`, raw);
   return {
     id: assertStorageId(`tracks[${index}].id`, String(o.id ?? "")),
@@ -141,7 +142,7 @@ function parseClipPart(
   return { assetId, sourceInSec, sourceOutSec };
 }
 
-function parseClip(
+export function parseClip(
   raw: unknown,
   index: number,
   trackIds: ReadonlySet<string>,
