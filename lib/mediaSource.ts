@@ -1,4 +1,4 @@
-import { getJobRecord } from "@/lib/jobs";
+import { ensureJobRecord } from "@/lib/jobs";
 import { assertJobOutputFile, assertUploadFileBelongsToVideo } from "@/lib/pathGuard";
 import { findUploadInputPath } from "@/lib/storage";
 import { assertStorageId } from "@/lib/validation";
@@ -24,7 +24,7 @@ export async function resolveInputPath(params: {
   const rawSid = params.sourceJobId;
   if (typeof rawSid === "string" && rawSid.trim().length > 0) {
     const sourceJobId = assertStorageId("sourceJobId", rawSid.trim());
-    const job = getJobRecord(sourceJobId);
+    const job = await ensureJobRecord(sourceJobId);
     if (!job) {
       throw new Error("参照元ジョブが見つかりません。");
     }

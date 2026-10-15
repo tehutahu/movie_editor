@@ -991,3 +991,11 @@ button.primary {
     grid-template-columns: 1fr;
   }
 }
+
+.project-persistence { padding: 8px 16px; border-bottom: 1px solid #444; font-size: 13px; }
+.project-persistence button { margin: 4px 8px; }
+.project-persistence p { margin: 4px 0; }
+.project-persistence input[type=file] { max-width: 250px; }
+.project-revision { display: flex; align-items: center; flex-wrap: wrap; }
+.project-dialog { position: fixed; z-index: 100; top: 25%; left: 10%; width: 80%; max-height: 65vh; overflow: auto; background: #1e2230; color: white; padding: 24px; border: 2px solid #7893eb; border-radius: 12px; box-shadow: 0 0 0 100vmax #0009; }
+.project-dialog label { display: block; margin: 12px 0; overflow-wrap: anywhere; }

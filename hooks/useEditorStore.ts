@@ -37,6 +37,7 @@ import {
 } from "@/lib/editor/compositor";
 import type { AppliedJobStep, Asset, ClipTransform, EditorProject } from "@/lib/editor/types";
 import { storageReferences } from "@/lib/editor/storageReferences";
+import { useProjectPersistence } from "@/hooks/useProjectPersistence";
 import { selectedClipExportRequest } from "@/lib/editor/selectedClipExport";
 
 type JobPollInfo = {
@@ -100,22 +101,43 @@ export function useEditorStore() {
   useEffect(() => {
     void protectReferences(JSON.parse(referenceKey)).catch(e => setStorageWarning(String(e)));
   }, [referenceKey, protectReferences]);
-  const finishEditing = useCallback(async () => {
-    if (!window.confirm("現在の編集内容・素材一覧・Undo/Redo履歴を破棄し、このタブの素材保護を解放します。よろしいですか？")) return;
-    // Discard references before releasing them. A failed release retains files.
-    setBusy("素材の保護を解放中…");
-    setHistory(createCommandHistory(createEmptyProject()));
-    try {
-      const res = await fetch("/api/storage/session", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "release", sessionId: sessionId() }) });
-      if (!res.ok) { const json = await res.json(); throw new Error(json.error ?? "素材解放に失敗しました。"); }
-      window.location.reload();
-    } catch (e) { setError(String(e)); setBusy(null); }
-  }, [sessionId]);
 
   const audioVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const project = useMemo(() => getCurrentProject(history), [history]);
+  const [projectEpoch, setProjectEpoch] = useState(0);
+  const persistence = useProjectPersistence({ history, setHistory, sessionId, busy, setBusy, setError,
+    onLoaded: () => { audioVideoRef.current?.pause(); setAppliedJobSteps([]); setLiveJob(null); setJobPhase(null); setProjectEpoch(v => v + 1); },
+  });
+  const finishRef = useRef(false);
+  const finishEditing = useCallback(async () => {
+    if (finishRef.current || busy || persistence.locked) return;
+    finishRef.current = true;
+    try {
+      if (!await persistence.confirmUnsaved()) return;
+      if (!window.confirm("現在の編集内容・素材一覧・Undo/Redo履歴を破棄し、このタブの素材保護を解放します。よろしいですか？")) return;
+      // Discard references before releasing them. A failed release retains files.
+      setBusy("素材の保護を解放中…");
+      const empty = createEmptyProject();
+      persistence.markDiscarded(empty);
+      setHistory(createCommandHistory(empty));
+      const res = await fetch("/api/storage/session", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "release", sessionId: sessionId() }),
+      });
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error ?? "素材解放に失敗しました。");
+      }
+      window.location.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      finishRef.current = false;
+      setBusy(null);
+    }
+  }, [sessionId, busy, persistence]);
+
 
   const dispatch = useCallback((command: EditorCommand) => {
     setHistory((h) => {
@@ -511,7 +533,7 @@ export function useEditorStore() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           editorSessionId: sessionId(),
-          videoId: asset.id,
+          videoId: asset.storageAssetId ?? asset.id,
           sourceJobId: asset.sourceJobId,
           speedFactor: factor,
           sampleRateHz: sr,
@@ -627,6 +649,7 @@ export function useEditorStore() {
     }
 
     function onKeyDown(e: KeyboardEvent) {
+      if (busy || persistence.locked) return;
       if (isEditableTarget(e.target)) return;
 
       const mod = e.ctrlKey || e.metaKey;
@@ -677,6 +700,7 @@ export function useEditorStore() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    busy, persistence.locked,
     addTrack,
     deleteSelected,
     duplicateSelected,
@@ -689,6 +713,7 @@ export function useEditorStore() {
   ]);
 
   return {
+    persistence, projectEpoch,
     project,
     busy,
     error,

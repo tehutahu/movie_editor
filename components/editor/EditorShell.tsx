@@ -1,5 +1,6 @@
 "use client";
 
+import { ProjectPersistencePanel } from "./ProjectPersistencePanel";
 import type { EditorStore } from "@/hooks/useEditorStore";
 import { AssetLibraryPanel } from "@/components/editor/AssetLibraryPanel";
 import { CompositorPreview } from "@/components/editor/CompositorPreview";
@@ -126,7 +127,8 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
         </p>
       </header>
 
-      <button type="button" className="storage-release" onClick={() => void finishEditing()} disabled={Boolean(busy)} title="このタブの編集・素材一覧・履歴を破棄し、不要になったサーバー素材を整理します">編集終了・素材解放</button>
+      <ProjectPersistencePanel editor={editor} />
+      <button type="button" className="storage-release" onClick={() => void finishEditing()} disabled={Boolean(busy) || editor.persistence.locked} title="このタブの編集・素材一覧・履歴を破棄し、不要になったサーバー素材を整理します">編集終了・素材解放</button>
       {storageWarning ? <p role="status" className="storage-notice">{storageWarning}</p> : null}
       {error ? <p className="error-banner">{error}</p> : null}
       {busy ? <p className="busy-banner">{busy}</p> : null}
@@ -137,7 +139,7 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
         </p>
       ) : null}
 
-      <div className="editor-shell-v2" ref={shellRef}>
+      <div className="editor-shell-v2" ref={shellRef} inert={editor.persistence.locked || Boolean(busy)}>
         <div
           className="editor-workspace-pane"
           style={{
@@ -196,7 +198,7 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
                   </button>
                 </div>
               </div>
-              <CompositorPreview editor={editor} />
+              <CompositorPreview key={editor.projectEpoch} editor={editor} />
             </div>
           </div>
         </div>

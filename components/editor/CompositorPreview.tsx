@@ -250,7 +250,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target) || helpOpen) return;
+      if (editor.busy || editor.persistence.locked || isEditableTarget(e.target) || helpOpen) return;
 
       const mod = e.ctrlKey || e.metaKey;
 
@@ -276,7 +276,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [helpOpen, seekStart, stepBack, stepForward, seekEnd, togglePlay]);
+  }, [editor.busy, editor.persistence.locked, helpOpen, seekStart, stepBack, stepForward, seekEnd, togglePlay]);
 
   useEffect(() => () => clearHideControlsTimer(), [clearHideControlsTimer]);
 

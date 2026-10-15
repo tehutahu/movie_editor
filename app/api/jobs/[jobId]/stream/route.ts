@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildFileStreamResponse } from "@/lib/fileStream";
-import { getJobRecord } from "@/lib/jobs";
+import { ensureJobRecord } from "@/lib/jobs";
 import { assertJobOutputFile } from "@/lib/pathGuard";
 import { assertStorageId } from "@/lib/validation";
 
@@ -20,7 +20,7 @@ export async function GET(
       { status: 400 },
     );
   }
-  const job = getJobRecord(jobId);
+  const job = await ensureJobRecord(jobId);
   if (!job) {
     return NextResponse.json({ error: "ジョブが見つかりません。" }, { status: 404 });
   }

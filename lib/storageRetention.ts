@@ -1,7 +1,8 @@
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, open } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { JOBS_ROOT, UPLOADS_ROOT } from "@/lib/paths";
+import { parseProjectDocument, type ProjectDocument } from "@/lib/editor/projectDocument";
 import { assertStorageId } from "@/lib/validation";
 
 export const DEFAULT_MAX_UPLOAD_COUNT = 20;
@@ -22,7 +23,8 @@ type Entry = {
   kind: "uploads" | "jobs"; owners: string[]; active: boolean;
   unknown: boolean; dependencies: string[];
 };
-type Registry = { version: 1; sessions: Record<string, { closed: boolean }>; entries: Record<string, Entry> };
+export type SavedProject = { id: string; createdAt: string; requestDigest: string; document: ProjectDocument };
+export type Registry = { projects?: Record<string, SavedProject>; version: 1; sessions: Record<string, { closed: boolean }>; entries: Record<string, Entry> };
 export type StorageReservation = { id: string; kind: Entry["kind"]; active?: boolean; dependencies?: string[]; transient?: boolean };
 // Next route bundles and HMR share this lock. One Next process owns a local
 // storage root. A filesystem lock also fails closed if a second process races
@@ -45,23 +47,34 @@ async function load(): Promise<Registry> {
       for (const owner of e.owners) { validId(owner); if (!raw.sessions[owner] || raw.sessions[owner].closed) throw new Error(); }
       e.dependencies.forEach(validId);
     }
+    if (raw.projects !== undefined && (!raw.projects || typeof raw.projects !== "object" || Array.isArray(raw.projects))) throw new Error();
+    for (const [id, revision] of Object.entries(raw.projects ?? {})) {
+      validId(id); if (revision.id !== id || typeof revision.requestDigest !== "string") throw new Error();
+      revision.document = parseProjectDocument(revision.document);
+    }
     return raw;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, sessions: {}, entries: {} };
     throw new StorageRetentionError("保護情報を読み取れません。削除・新規保存を停止しました。運用者が storage/retention.json を確認してください。", 503);
   }
 }
-async function save(registry: Registry) {
+export async function saveRetentionRegistry(registry: Registry) {
+  const tmp = `${registryPath()}.${randomUUID()}.tmp`;
   try {
     await mkdir(path.dirname(registryPath()), { recursive: true });
-    const tmp = `${registryPath()}.${randomUUID()}.tmp`;
-    await writeFile(tmp, JSON.stringify(registry), "utf8");
+    const file = await open(tmp, "wx");
+    try { await file.writeFile(JSON.stringify(registry), "utf8"); await file.sync(); }
+    finally { await file.close(); }
     await rename(tmp, registryPath());
+    const dir = await open(path.dirname(registryPath()), "r");
+    try { await dir.sync(); } finally { await dir.close(); }
   } catch {
+    await rm(tmp, { force: true }).catch(() => undefined);
     throw new StorageRetentionError("保護情報を保存できません。新規保存・素材解放を中止しました。", 503);
   }
 }
-function transaction<T>(fn: (r: Registry) => Promise<T>): Promise<T> {
+
+export function retentionTransaction<T>(fn: (r: Registry) => Promise<T>): Promise<T> {
   const key = registryPath();
   const previous = locks.get(key) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(async () => {
@@ -101,6 +114,7 @@ function openSession(r: Registry, sessionId: string) {
 }
 async function collect(r: Registry, keepIds: readonly string[] = []) {
   const protectedIds = new Set(keepIds);
+  for (const revision of Object.values(r.projects ?? {})) for (const asset of revision.document.project.assets) protectedIds.add(asset.media.id);
   for (const [id, e] of Object.entries(r.entries)) {
     if (e.unknown || e.active || e.owners.length) protectedIds.add(id);
     if (e.active) e.dependencies.forEach(id => protectedIds.add(id));
@@ -129,13 +143,13 @@ async function counts(r: Registry) {
   return { uploadsCount: uploadIds.size, jobsCount: jobIds.size };
 }
 export function storageRetentionStatus() {
-  return transaction(async r => {
+  return retentionTransaction(async r => {
     const count = await counts(r);
     return { ...count, ...(count.uploadsCount >= maxUploadCount() || count.jobsCount >= maxJobCount() ? { warning: RETENTION_NOTICE } : {}) };
   });
 }
 export function reserveStorage(resources: StorageReservation[], sessionId?: string) {
-  return transaction(async r => {
+  return retentionTransaction(async r => {
     if (sessionId) openSession(r, sessionId);
     for (const resource of resources) { validId(resource.id); resource.dependencies?.forEach(validId); }
     await collect(r);
@@ -143,7 +157,7 @@ export function reserveStorage(resources: StorageReservation[], sessionId?: stri
     const uploads = resources.filter(x => x.kind === "uploads").length;
     const jobs = resources.length - uploads;
     if ((uploads && count.uploadsCount + uploads > maxUploadCount()) || (jobs && count.jobsCount + jobs > maxJobCount())) {
-      await save(r);
+      await saveRetentionRegistry(r);
       throw new StorageRetentionError(RETENTION_NOTICE);
     }
     for (const resource of resources) {
@@ -151,11 +165,11 @@ export function reserveStorage(resources: StorageReservation[], sessionId?: stri
       r.entries[resource.id] = { kind: resource.kind, owners: sessionId ? [sessionId] : [], active: resource.active ?? false,
         unknown: (!sessionId && !resource.transient) || (resource.kind === "uploads" && usesBlobStorage()), dependencies: resource.dependencies ?? [] };
     }
-    await save(r);
+    await saveRetentionRegistry(r);
   });
 }
 export function protectStorageSession(sessionId: string, keepIds: readonly string[]) {
-  return transaction(async r => {
+  return retentionTransaction(async r => {
     openSession(r, sessionId);
     for (const id of keepIds) {
       validId(id);
@@ -163,22 +177,22 @@ export function protectStorageSession(sessionId: string, keepIds: readonly strin
       if (entry && !entry.owners.includes(sessionId)) entry.owners.push(sessionId);
     }
     // Additive by design: out-of-order updates cannot unpin an Undo/Redo source.
-    await save(r);
+    await saveRetentionRegistry(r);
   });
 }
 export function releaseStorageSession(sessionId: string) {
-  return transaction(async r => {
+  return retentionTransaction(async r => {
     validId(sessionId); r.sessions[sessionId] = { closed: true };
     for (const entry of Object.values(r.entries)) entry.owners = entry.owners.filter(owner => owner !== sessionId);
     // Persist the explicit release before any deletion; never expire a tab.
-    await save(r); const result = await collect(r); await save(r); return result;
+    await saveRetentionRegistry(r); const result = await collect(r); await saveRetentionRegistry(r); return result;
   });
 }
 export function finishStorageJob(id: string) {
-  return transaction(async r => { if (r.entries[id]) r.entries[id].active = false; await save(r); });
+  return retentionTransaction(async r => { if (r.entries[id]) r.entries[id].active = false; await saveRetentionRegistry(r); });
 }
 export function cancelStorageReservations(ids: readonly string[]) {
-  return transaction(async r => {
+  return retentionTransaction(async r => {
     // Only the failed request's newly allocated IDs may be discarded.
     for (const id of ids) {
       const entry = r.entries[id];
@@ -189,12 +203,23 @@ export function cancelStorageReservations(ids: readonly string[]) {
       entry.unknown = entry.kind === "uploads" && usesBlobStorage();
       entry.owners = [];
     }
-    await save(r); await collect(r); await save(r);
+    await saveRetentionRegistry(r); await collect(r); await saveRetentionRegistry(r);
   });
 }
 export function pruneAllStorage(keepIds: readonly string[]) {
-  return transaction(async r => { keepIds.forEach(validId); const result = await collect(r, keepIds); await save(r); const count = await counts(r);
+  return retentionTransaction(async r => { keepIds.forEach(validId); const result = await collect(r, keepIds); await saveRetentionRegistry(r); const count = await counts(r);
     return { ...result, ...(count.uploadsCount >= maxUploadCount() || count.jobsCount >= maxJobCount() ? { warning: RETENTION_NOTICE } : {}) }; });
 }
 export async function pruneUploadStorage(keepIds: readonly string[] = []) { return { removedIds: (await pruneAllStorage(keepIds)).uploadsRemoved }; }
 export async function pruneJobsStorage(keepIds: readonly string[] = []) { return { removedIds: (await pruneAllStorage(keepIds)).jobsRemoved }; }
+
+/** Caller holds the same lock used by collection; file validation must run here too. */
+export function retainProjectSession(r: Registry, sessionId: string, resources: { id: string; kind: "uploads" | "jobs" }[]) {
+  openSession(r, sessionId);
+  for (const { id, kind } of resources) {
+    validId(id);
+    const entry = r.entries[id] ??= { kind, owners: [], active: false, unknown: true, dependencies: [] };
+    if (entry.kind !== kind) throw new StorageRetentionError("素材参照が競合しています。", 409);
+    if (!entry.owners.includes(sessionId)) entry.owners.push(sessionId);
+  }
+}
