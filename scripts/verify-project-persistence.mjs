@@ -1,69 +1,15 @@
-// Optional manual browser verification. See README.md for setup.
-/* global document, DataTransfer, DragEvent, fetch */
-import { createRequire } from "node:module";
-import { spawn, execFileSync } from "node:child_process";
+// Production browser regression with synthetic media and isolated storage.
+/* global document, DataTransfer, DragEvent, fetch, AbortSignal */
 import fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import assert from "node:assert/strict";
-import path from "node:path";
-import os from "node:os";
 import process from "node:process";
 import console from "node:console";
 import { Buffer } from "node:buffer";
-import { setTimeout } from "node:timers";
-import { fileURLToPath } from "node:url";
-const loadOptionalModule = createRequire(import.meta.url);
-const { chromium } = loadOptionalModule(
-  process.env.MOVIE_EDITOR_PLAYWRIGHT_MODULE || "playwright",
-);
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const cwd = path.resolve(scriptDirectory, ".."),
-  evidence = fs.mkdtempSync(
-    path.join(os.tmpdir(), "movie-editor-project-e2e-"),
-  ),
-  root = path.join(evidence, "storage");
-console.log("Evidence:", evidence);
-execFileSync(
-  "/usr/bin/ffmpeg",
-  [
-    "-y",
-    "-f",
-    "lavfi",
-    "-i",
-    "testsrc2=size=320x240:rate=30",
-    "-f",
-    "lavfi",
-    "-i",
-    "sine=frequency=440:sample_rate=44100",
-    "-t",
-    "2",
-    "-c:v",
-    "libx264",
-    "-c:a",
-    "aac",
-    evidence + "/source.mp4",
-  ],
-  { stdio: "ignore" },
-);
-for (const ext of ["png", "jpg"]) {
-  execFileSync(
-    "/usr/bin/ffmpeg",
-    [
-      "-v",
-      "error",
-      "-y",
-      "-f",
-      "lavfi",
-      "-i",
-      "color=red:s=160x120",
-      "-frames:v",
-      "1",
-      `${evidence}/still.${ext}`,
-    ],
-    { stdio: "ignore" },
-  );
-}
-let server, browser;
+import { verification } from "./browser-test-utils.mjs";
+const suite = verification("persistence", 3101);
+const { evidence, root, baseURL, ff, start, stop, verifyExport } = suite;
+let browser, page;
 const log = [];
 function ok(message) {
   log.push(message);
@@ -73,58 +19,12 @@ function ok(message) {
     JSON.stringify(log, null, 2),
   );
 }
-async function start() {
-  server = spawn(
-    process.execPath,
-    [
-      "node_modules/next/dist/bin/next",
-      "start",
-      "-H",
-      "127.0.0.1",
-      "-p",
-      "3000",
-    ],
-    {
-      cwd,
-      env: {
-        ...process.env,
-        STORAGE_DRIVER: "local",
-        BLOB_READ_WRITE_TOKEN: "",
-        MOVIE_EDITOR_STORAGE_ROOT: root,
-        FFMPEG_PATH: "/usr/bin/ffmpeg",
-        FFPROBE_PATH: "/usr/bin/ffprobe",
-      },
-      stdio: [
-        "ignore",
-        fs.openSync(evidence + "/production-server.log", "a"),
-        fs.openSync(evidence + "/production-server.log", "a"),
-      ],
-    },
-  );
-  for (let i = 0; i < 100; i++) {
-    try {
-      if ((await fetch("http://127.0.0.1:3000")).ok) return;
-    } catch {
-      /* Wait for the server to accept connections. */
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw Error("server not ready");
-}
-async function stop() {
-  if (server) {
-    const child = server;
-    const done = new Promise((r) => child.once("exit", r));
-    child.kill("SIGTERM");
-    await done;
-    server = null;
-  }
-}
 async function json(url, body, method = "POST") {
-  const res = await fetch("http://127.0.0.1:3000" + url, {
+  const res = await fetch(baseURL + url, {
     method,
     headers: { "content-type": "application/json" },
     ...(body ? { body: JSON.stringify(body) } : {}),
+    signal: AbortSignal.timeout(30000),
   });
   const data = await res.json();
   return { status: res.status, data };
@@ -139,22 +39,19 @@ async function waitIdle(page) {
   assert.deepEqual(errors, []);
 }
 (async () => {
-  await fsp.rm(root, { recursive: true, force: true });
+  ff(["-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "2", "-c:v", "libx264", "-c:a", "aac", evidence + "/source.mp4"]);
+  for (const ext of ["png", "jpg"]) ff(["-y", "-f", "lavfi", "-i", "color=red:s=160x120", "-frames:v", "1", `${evidence}/still.${ext}`]);
   await start();
-  browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
-    headless: true,
-    args: ["--no-sandbox"],
-  });
+  browser = await suite.launch();
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1100 },
     acceptDownloads: true,
   });
-  const page = await context.newPage();
+  page = await context.newPage();
   const runtimeErrors = [];
   page.on("pageerror", (e) => runtimeErrors.push(e.message));
   page.on("dialog", (d) => d.accept());
-  await page.goto("http://127.0.0.1:3000");
+  await page.goto(baseURL);
   await page
     .locator(".asset-upload-btn input")
     .setInputFiles(evidence + "/source.mp4");
@@ -298,27 +195,7 @@ async function waitIdle(page) {
   const exported = await exportDownload;
   await exported.saveAs(evidence + "/roundtrip.mp4");
   await waitIdle(page);
-  const probe = JSON.parse(
-    execFileSync(
-      "/usr/bin/ffprobe",
-      [
-        "-v",
-        "error",
-        "-show_format",
-        "-show_streams",
-        "-of",
-        "json",
-        evidence + "/roundtrip.mp4",
-      ],
-      { encoding: "utf8" },
-    ),
-  );
-  fs.writeFileSync(
-    evidence + "/roundtrip-ffprobe.json",
-    JSON.stringify(probe, null, 2),
-  );
-  assert.equal(probe.streams.find((s) => s.codec_type === "video").width, 1920);
-  assert.ok(Number(probe.format.duration) >= 4);
+  verifyExport(evidence + "/roundtrip.mp4", { width: 1920, height: 1440, duration: 10, source: evidence + "/source.mp4", frequency: 220 });
   ok(
     "Required save → end editing → restart → load → real ffmpeg export completed and ffprobe verified",
   );
@@ -425,6 +302,7 @@ async function waitIdle(page) {
   await page.getByTitle("全体書き出し (Ctrl+E)", { exact: true }).click();
   await (await dl2Promise).saveAs(evidence + "/relinked.mp4");
   await waitIdle(page);
+  verifyExport(evidence + "/relinked.mp4", { width: 1920, height: 1440, duration: 10, source: evidence + "/source.mp4", frequency: 220 });
   ok(
     "Relinked logical IDs resolve through physical upload references during real export",
   );
@@ -437,8 +315,9 @@ async function waitIdle(page) {
   const stable = (await json("/api/projects/" + latest.id, null, "GET")).data;
   const sourceId = stable.project.assets[0].media.id;
   const tab2 = await context.newPage();
+  tab2.on("pageerror", (e) => runtimeErrors.push(e.message));
   tab2.on("dialog", (d) => d.accept());
-  await tab2.goto("http://127.0.0.1:3000");
+  await tab2.goto(baseURL);
   await tab2.getByText(/サーバーの保存版/).click();
   await tab2
     .locator(".project-revision")
@@ -468,7 +347,7 @@ async function waitIdle(page) {
   const images = await context.newPage();
   images.on("dialog", (d) => d.accept());
   images.on("pageerror", (e) => runtimeErrors.push(e.message));
-  await images.goto("http://127.0.0.1:3000");
+  await images.goto(baseURL);
   await images
     .locator(".asset-upload-btn input")
     .setInputFiles([`${evidence}/still.png`, `${evidence}/still.jpg`]);
@@ -568,22 +447,7 @@ async function waitIdle(page) {
   await images.getByTitle("全体書き出し (Ctrl+E)", { exact: true }).click();
   await (await imageDownload).saveAs(`${evidence}/image-roundtrip.mp4`);
   await waitIdle(images);
-  const imageProbe = JSON.parse(
-    execFileSync(
-      "/usr/bin/ffprobe",
-      [
-        "-v",
-        "error",
-        "-show_format",
-        "-show_streams",
-        "-of",
-        "json",
-        `${evidence}/image-roundtrip.mp4`,
-      ],
-      { encoding: "utf8" },
-    ),
-  );
-  assert.ok(imageProbe.streams.some((s) => s.codec_type === "video"));
+  verifyExport(`${evidence}/image-roundtrip.mp4`, { width: 1920, height: 1440, duration: 10, audio: false, expectedColour: [252, 0, 0] });
   assert.equal(
     (await json(`/api/projects/${imageTimeline.id}`, null, "GET")).status,
     200,
@@ -602,7 +466,8 @@ async function waitIdle(page) {
   ok("Browser checks completed without page runtime errors");
 })().catch(async (e) => {
   console.error(e);
-  if (browser) await browser.close();
-  await stop();
+  fs.writeFileSync(evidence + "/failure.txt", String(e.stack ?? e));
+  const activePage = browser?.contexts()[0]?.pages().at(-1) ?? page;
+  if (activePage && !activePage.isClosed()) await activePage.screenshot({ path: evidence + "/failure.png", fullPage: true }).catch(() => { /* Preserve original failure if screenshot is unavailable. */ });
   process.exitCode = 1;
-});
+}).finally(() => suite.cleanup());

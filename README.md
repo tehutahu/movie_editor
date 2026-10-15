@@ -171,9 +171,9 @@ npm run start   # 本番起動（127.0.0.1）
 
 ## CI
 
-GitHub Actions（`.github/workflows/ci.yml`）: `npm ci` → lint → test → build → audit。
+GitHub Actions（`.github/workflows/ci.yml`）: `npm ci` → ffmpeg・Chromium 導入 → lint → 実 ffmpeg を含む test → build → 型チェック → browser → audit。
 
-CI では ffmpeg をインストールせず、Vitest は API をモックで検証します。実ファイル処理やブラウザ E2E には ffmpeg が必要です。
+CI は ffmpeg と Playwright Chromium をインストールし、実 ffmpeg 回帰、production build、型チェック、履歴・保存復元のブラウザ回帰を必須実行します。ブラウザの証拠は CI artifact として7日間保存します。
 
 ## 注意
 
@@ -210,13 +210,16 @@ RUN_FFMPEG_TESTS=1 FFMPEG_PATH=/usr/bin/ffmpeg FFPROBE_PATH=/usr/bin/ffprobe npm
 
 ## 保存・読み込みの実ブラウザ検証
 
-手動 E2E は本番ビルド、Chromium、実 ffmpeg/ffprobe を使い、独立した一時ストレージと合成動画で検証します。ポート3000を空けて実行してください。既存の `storage/` には触れません。
+ブラウザ回帰は本番ビルド、Playwright Chromium、実 ffmpeg/ffprobe を使います。ポート3100・3101を空けて実行してください。合成素材と独立した一時ストレージを使い、既存の `storage/` には触れません。
 
 ```bash
+npm ci
+npx playwright install --with-deps chromium
 npm run build
-npm install --prefix /tmp/movie-editor-browser --cache /tmp/movie-editor-npm-cache --no-save playwright
-MOVIE_EDITOR_PLAYWRIGHT_MODULE=/tmp/movie-editor-browser/node_modules/playwright \
-  CHROMIUM_PATH=/usr/bin/chromium node scripts/verify-project-persistence.mjs
+npm run test:typecheck
+npm run test:browser
 ```
 
-Linux の `/usr/bin/ffmpeg`・`/usr/bin/ffprobe` が必要です。スクリプトはサーバーを起動・終了・再起動し、保存→編集終了→再起動→読み込み→実書き出し、結合／速度復元、応答消失後の再試行、二重保存、JSON一致、不正JSON、保存／破棄／キャンセル、欠損時の再指定、他タブの参照保持を確認します。最初に表示する一時ディレクトリへ JSON・MP4・ffprobe結果・スクリーンショット・実行ログを残します。単体・ストレージ統合テストは `npm test` に含まれます。実 PNG/JPEG の保存・復元と既存の実 ffmpeg 回帰テストも実行するには、`RUN_FFMPEG_TESTS=1 FFMPEG_PATH=/usr/bin/ffmpeg FFPROBE_PATH=/usr/bin/ffprobe npm test` を使ってください。
+`FFMPEG_PATH` / `FFPROBE_PATH` でバイナリを指定できます（既定はシステム PATH）。既存 Chromium を明示する場合は `CHROMIUM_PATH` を指定します。履歴回帰は選択・シーク・再生後の Redo と新規編集後の履歴破棄を検査します。保存復元回帰はサーバーを再起動し、保存→編集終了→再起動→読み込み→書き出し、結合・速度復元、JSON、欠損素材の再指定、複数タブ、実 PNG/JPEG を検査します。すべての書き出しを ffprobe と全体デコードで確認し、動画出力の映像・音声も検査します。JSON・MP4・スクリーンショット・ログは `test-results/` に残ります（`BROWSER_RESULTS_DIR` で変更可）。
+
+実 ffmpeg 回帰を含む全 Vitest テストは `RUN_FFMPEG_TESTS=1 npm test`、通常の単体テストは `npm test` で実行できます。

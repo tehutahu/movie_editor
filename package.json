@@ -15,7 +15,9 @@
     "start": "next start -H 127.0.0.1",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:typecheck": "tsc --noEmit",
+    "test:browser": "node scripts/verify-editor-history.mjs && node scripts/verify-project-persistence.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.4.1",
@@ -30,6 +32,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.2",
+    "playwright": "1.64.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.59.3",
     "vitest": "^4.1.11"
