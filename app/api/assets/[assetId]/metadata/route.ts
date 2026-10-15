@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveAssetInputPath } from "@/lib/assetResolve";
-import { assertFfmpegAvailable, probeVideo } from "@/lib/ffmpeg";
+import { assertFfmpegAvailable, probeImage, probeVideo } from "@/lib/ffmpeg";
 import { getMediaStorage } from "@/lib/storage";
 import { assertStorageId } from "@/lib/validation";
 
@@ -25,13 +25,13 @@ export async function GET(_req: Request, { params }: Params) {
     const isImage = ["png", "jpg", "jpeg", "webp", "gif"].includes(ext);
 
     if (isImage) {
-      const probe = await probeVideo(inputPath).catch(() => null);
+      const probe = await probeImage(inputPath);
       return NextResponse.json({
         assetId,
         kind: "image",
         displayName,
-        width: probe?.width,
-        height: probe?.height,
+        width: probe.width,
+        height: probe.height,
         hasAudio: false,
         hasVideo: false,
         durationSec: undefined,

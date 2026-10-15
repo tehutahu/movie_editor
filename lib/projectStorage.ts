@@ -14,8 +14,9 @@ import {
   retainProjectSession,
   StorageRetentionError,
 } from "@/lib/storageRetention";
-import { assertStorageId } from "@/lib/validation";
-import { probeVideo } from "@/lib/ffmpeg";
+import { assertStorageId, parseAllowedAssetExtension } from "@/lib/validation";
+import { persistCompletedJobForProject } from "@/lib/jobs";
+import { probeImage, probeVideo } from "@/lib/ffmpeg";
 
 function requireLocal() {
   if (
@@ -79,9 +80,15 @@ async function validateMedia(doc: ProjectDocument, saving: boolean) {
       });
       continue;
     }
+    if (parseAllowedAssetExtension(input!)?.kind !== asset.kind) {
+      throw new Error("素材の種類が実ファイルと一致しません。");
+    }
     if (saving) Object.assign(asset.media, actual);
     // Validate against real metadata too; imported JSON cannot extend a source interval.
-    const meta = await probeVideo(input!);
+    const meta =
+      asset.kind === "image"
+        ? { ...(await probeImage(input!)), durationSec: 0 }
+        : await probeVideo(input!);
     if (
       !meta.hasVideo ||
       (asset.width !== undefined && asset.width !== meta.width) ||
@@ -105,6 +112,14 @@ async function validateMedia(doc: ProjectDocument, saving: boolean) {
       throw new Error("素材の実際の長さ・形式と区間が一致しません。");
   }
   if (missing.length) throw new MissingProjectMediaError(missing);
+  // Complete all validation before durable job writes. Never accept in-memory-only outputs.
+  for (const id of new Set(
+    doc.project.assets
+      .filter((a) => a.media.kind === "job")
+      .map((a) => a.media.id),
+  )) {
+    await persistCompletedJobForProject(id);
+  }
 }
 export async function saveProject(id: string, raw: unknown) {
   requireLocal();
@@ -114,6 +129,11 @@ export async function saveProject(id: string, raw: unknown) {
     .update(JSON.stringify(doc))
     .digest("hex");
   return retentionTransaction(async (r) => {
+    if (r.deletedProjects?.[id])
+      throw new StorageRetentionError(
+        "この保存版IDは削除済みです。新しい保存版として保存してください。",
+        409,
+      );
     r.projects ??= {};
     const existing = r.projects[id];
     if (existing) {
@@ -167,6 +187,7 @@ export async function deleteProject(id: string) {
   requireLocal();
   assertStorageId("保存版ID", id);
   return retentionTransaction(async (r) => {
+    (r.deletedProjects ??= {})[id] = true;
     if (r.projects) delete r.projects[id];
     // Removing the manifest and its pins is atomic and idempotent; collection is separate.
     await saveRetentionRegistry(r);

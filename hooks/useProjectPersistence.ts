@@ -91,7 +91,12 @@ export function useProjectPersistence(options: {
       body: JSON.stringify({ id: request.id, document: request.document }),
     });
     const json = await res.json();
-    if (!res.ok) throw new Error(json.error ?? "保存に失敗しました。");
+    if (!res.ok) {
+      // A definitive ID conflict/deletion needs a fresh save operation. Network/5xx
+      // failures retain the ID because the original commit result is uncertain.
+      if (res.status === 409) retry.current = null;
+      throw new Error(json.error ?? "保存に失敗しました。");
+    }
     setSavedKey(snapshotKey);
     setMessage(`サーバー保存済み (${json.createdAt})`);
     retry.current = null;

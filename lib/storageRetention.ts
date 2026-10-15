@@ -24,7 +24,7 @@ type Entry = {
   unknown: boolean; dependencies: string[];
 };
 export type SavedProject = { id: string; createdAt: string; requestDigest: string; document: ProjectDocument };
-export type Registry = { projects?: Record<string, SavedProject>; version: 1; sessions: Record<string, { closed: boolean }>; entries: Record<string, Entry> };
+export type Registry = { deletedProjects?: Record<string, true>; projects?: Record<string, SavedProject>; version: 1; sessions: Record<string, { closed: boolean }>; entries: Record<string, Entry> };
 export type StorageReservation = { id: string; kind: Entry["kind"]; active?: boolean; dependencies?: string[]; transient?: boolean };
 // Next route bundles and HMR share this lock. One Next process owns a local
 // storage root. A filesystem lock also fails closed if a second process races
@@ -46,6 +46,10 @@ async function load(): Promise<Registry> {
       if (!e || !["uploads", "jobs"].includes(e.kind) || typeof e.active !== "boolean" || typeof e.unknown !== "boolean" || !Array.isArray(e.owners) || !Array.isArray(e.dependencies)) throw new Error();
       for (const owner of e.owners) { validId(owner); if (!raw.sessions[owner] || raw.sessions[owner].closed) throw new Error(); }
       e.dependencies.forEach(validId);
+    }
+    if (raw.deletedProjects !== undefined) {
+      if (!raw.deletedProjects || typeof raw.deletedProjects !== "object" || Array.isArray(raw.deletedProjects)) throw new Error();
+      for (const [id, deleted] of Object.entries(raw.deletedProjects)) { validId(id); if (deleted !== true || raw.projects?.[id]) throw new Error(); }
     }
     if (raw.projects !== undefined && (!raw.projects || typeof raw.projects !== "object" || Array.isArray(raw.projects))) throw new Error();
     for (const [id, revision] of Object.entries(raw.projects ?? {})) {

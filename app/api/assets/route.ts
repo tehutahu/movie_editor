@@ -1,7 +1,7 @@
 import { storageRetentionStatus, reserveStorage, finishStorageJob, cancelStorageReservations, StorageRetentionError } from "@/lib/storageRetention";
 import { NextResponse } from "next/server";
 import { displayNameFromOriginalFilename } from "@/lib/exportName";
-import { assertFfmpegAvailable, probeVideo } from "@/lib/ffmpeg";
+import { assertFfmpegAvailable, probeImage, probeVideo } from "@/lib/ffmpeg";
 import { createRetainedJobRecord, patchJobRecord, runDetached } from "@/lib/jobs";
 import { generateFilmstrip } from "@/lib/ffmpeg";
 import { getMediaStorage } from "@/lib/storage";
@@ -130,9 +130,9 @@ export async function POST(req: Request) {
         height = probe.height;
         thumbnailJobId = await runThumbnailJob(assetId, inputPath, probe.durationSec);
       } else if (inputPath && parsed.kind === "image") {
-        const probe = await probeVideo(inputPath).catch(() => null);
-        width = probe?.width;
-        height = probe?.height;
+        const probe = await probeImage(inputPath);
+        width = probe.width;
+        height = probe.height;
       }
 
       await pruneUploadsAfterSave(assetId);

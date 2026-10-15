@@ -14,6 +14,7 @@ const state = vi.hoisted(() => {
   vi.resetModules();
   return {
     roots: { STORAGE_ROOT: "", UPLOADS_ROOT: "", JOBS_ROOT: "" },
+    failJobCommit: false,
     failAfterCommit: false,
     failCommit: false,
   };
@@ -32,6 +33,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return {
     ...actual,
     rename: async (a: string, b: string) => {
+      if (state.failJobCommit && b.endsWith("meta.json"))
+        throw new Error("synthetic job metadata failure");
       if (state.failCommit && b.endsWith("retention.json"))
         throw new Error("synthetic disk failure");
       await actual.rename(a, b);
@@ -55,7 +58,7 @@ import {
 } from "./storageRetention";
 import { projectDocumentDraft } from "./editor/projectDocument";
 import { createEmptyProject, clipFromAsset } from "./editor/project";
-import { clearJobStoreForTests } from "./jobs";
+import { clearJobStoreForTests, createJobRecord } from "./jobs";
 let root: string;
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "project-storage-"));
@@ -64,12 +67,14 @@ beforeEach(async () => {
     UPLOADS_ROOT: path.join(root, "uploads"),
     JOBS_ROOT: path.join(root, "jobs"),
   });
+  state.failJobCommit = false;
   state.failAfterCommit = false;
   state.failCommit = false;
   vi.stubEnv("MAX_UPLOAD_COUNT", "20");
   vi.stubEnv("MAX_JOB_COUNT", "50");
 });
 afterEach(async () => {
+  state.failJobCommit = false;
   state.failAfterCommit = false;
   state.failCommit = false;
   vi.unstubAllEnvs();
@@ -215,6 +220,7 @@ it("a lost result after atomic rename is safely retried without duplicate versio
   await saveProject(old, s.doc);
   state.failAfterCommit = true;
   await expect(saveProject(next, s.doc)).rejects.toThrow(/保存できません/);
+  state.failJobCommit = false;
   state.failAfterCommit = false;
   const retry = await saveProject(next, s.doc);
   expect(retry.id).toBe(next);
@@ -244,4 +250,93 @@ it("saves empty and library-only states and rejects fabricated real-media metada
   await saveProject(randomUUID(), s.doc);
   s.doc.project.assets[0].sourceDurationSec = 100;
   await expect(saveProject(randomUUID(), s.doc)).rejects.toThrow(/メタデータ/);
+});
+
+it("late save retries cannot resurrect a deleted revision using durable tombstones", async () => {
+  const s = await source(),
+    id = randomUUID();
+  await saveProject(id, s.doc);
+  await deleteProject(id);
+  await expect(saveProject(id, s.doc)).rejects.toThrow(/削除済み/);
+  await releaseStorageSession(s.session);
+  await expect(access(path.join(root, "uploads", s.id))).rejects.toThrow();
+  expect(await listProjects()).toHaveLength(0);
+  expect(
+    JSON.parse(await readFile(path.join(root, "retention.json"), "utf8"))
+      .deletedProjects[id],
+  ).toBe(true);
+  await expect(saveProject(id, s.doc)).rejects.toThrow(/削除済み/);
+});
+it("a delete that wins the race also rejects a not-yet-committed save with that ID", async () => {
+  const s = await source(),
+    id = randomUUID();
+  const results = await Promise.allSettled([
+    deleteProject(id),
+    saveProject(id, s.doc),
+  ]);
+  expect(results[0].status).toBe("fulfilled");
+  expect(results[1].status).toBe("rejected");
+  expect(await listProjects()).toHaveLength(0);
+  await access(path.join(root, "uploads", s.id));
+});
+it("job metadata persistence failure rejects save without replacing old revisions; retry repairs metadata for restart", async () => {
+  const s = await source(),
+    old = randomUUID(),
+    id = randomUUID(),
+    job = randomUUID();
+  await saveProject(old, s.doc);
+  await reserveStorage([{ id: job, kind: "jobs" }], s.session);
+  const dir = path.join(root, "jobs", job);
+  await mkdir(dir, { recursive: true });
+  const outputPath = path.join(dir, "output_restored.mp4");
+  await writeFile(outputPath, "restored bytes");
+  createJobRecord("restore", { id: job, status: "done", outputPath });
+  await vi.waitFor(async () => {
+    await access(path.join(dir, "meta.json"));
+  });
+  // Simulate an earlier best-effort metadata write that never reached disk.
+  await rm(path.join(dir, "meta.json"));
+  const draft = structuredClone(s.doc);
+  draft.project.assets[0].media = {
+    ...draft.project.assets[0].media,
+    kind: "job",
+    id: job,
+  };
+  state.failJobCommit = true;
+  await expect(saveProject(id, draft)).rejects.toThrow(/ジョブ情報を永続化/);
+  expect((await listProjects()).map((p) => p.id)).toEqual([old]);
+  await access(outputPath);
+  state.failJobCommit = false;
+  const saved = await saveProject(id, draft);
+  const persisted = JSON.parse(
+    await readFile(path.join(dir, "meta.json"), "utf8"),
+  );
+  expect(persisted.status).toBe("done");
+  expect(persisted.outputPath).toBe(outputPath);
+  clearJobStoreForTests();
+  await releaseStorageSession(s.session);
+  const loaded = await loadProject(saved.document, randomUUID());
+  expect(loaded.project.assets[0].sourceJobId).toBe(job);
+});
+
+it("delete failures keep old pins before commit and an uncertain committed delete is safely retried", async () => {
+  const s = await source(),
+    first = randomUUID(),
+    second = randomUUID();
+  await saveProject(first, s.doc);
+  await saveProject(second, s.doc);
+  state.failCommit = true;
+  await expect(deleteProject(first)).rejects.toThrow(/保存できません/);
+  state.failCommit = false;
+  expect((await listProjects()).map((p) => p.id)).toEqual([first, second]);
+  await releaseStorageSession(s.session);
+  await access(path.join(root, "uploads", s.id));
+  state.failAfterCommit = true;
+  await expect(deleteProject(first)).rejects.toThrow(/保存できません/);
+  state.failAfterCommit = false;
+  await deleteProject(first);
+  await pruneAllStorage([]);
+  expect((await listProjects()).map((p) => p.id)).toEqual([second]);
+  await access(path.join(root, "uploads", s.id));
+  await expect(saveProject(first, s.doc)).rejects.toThrow(/削除済み/);
 });

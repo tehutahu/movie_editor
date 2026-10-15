@@ -45,6 +45,24 @@ execFileSync(
   ],
   { stdio: "ignore" },
 );
+for (const ext of ["png", "jpg"]) {
+  execFileSync(
+    "/usr/bin/ffmpeg",
+    [
+      "-v",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=red:s=160x120",
+      "-frames:v",
+      "1",
+      `${evidence}/still.${ext}`,
+    ],
+    { stdio: "ignore" },
+  );
+}
 let server, browser;
 const log = [];
 function ok(message) {
@@ -445,6 +463,138 @@ async function waitIdle(page) {
     path: evidence + "/loaded-relinked.png",
     fullPage: true,
   });
+  // Images must not require a video duration. Exercise an uncertain save that
+  // another tab deletes before the original tab retries it.
+  const images = await context.newPage();
+  images.on("dialog", (d) => d.accept());
+  images.on("pageerror", (e) => runtimeErrors.push(e.message));
+  await images.goto("http://127.0.0.1:3000");
+  await images
+    .locator(".asset-upload-btn input")
+    .setInputFiles([`${evidence}/still.png`, `${evidence}/still.jpg`]);
+  await images.waitForFunction(
+    () => document.querySelectorAll(".asset-card").length === 2,
+  );
+  await waitIdle(images);
+  let deletedSaveId;
+  await images.route("**/api/projects", async (route) => {
+    if (route.request().method() === "POST" && !deletedSaveId) {
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      deletedSaveId = (await response.json()).id;
+      await route.abort("failed");
+    } else await route.continue();
+  });
+  await images.getByRole("button", { name: "新しい保存版を保存" }).click();
+  await images.waitForSelector(".error-banner");
+  await images.waitForFunction(() => !document.querySelector(".busy-banner"));
+  await json(`/api/projects/${deletedSaveId}`, null, "DELETE");
+  await images.getByRole("button", { name: "新しい保存版を保存" }).click();
+  await images.waitForFunction(() =>
+    document.querySelector(".error-banner")?.textContent.includes("削除済み"),
+  );
+  await images.waitForFunction(() => !document.querySelector(".busy-banner"));
+  assert.equal(
+    await images.locator(".project-persistence strong").innerText(),
+    "未保存の変更あり",
+  );
+  assert.ok(
+    !(await json("/api/projects", null, "GET")).data.projects.some(
+      (v) => v.id === deletedSaveId,
+    ),
+  );
+  await images.getByRole("button", { name: "新しい保存版を保存" }).click();
+  await waitIdle(images);
+  await images.unroute("**/api/projects");
+  const imageLibrary = (
+    await json("/api/projects", null, "GET")
+  ).data.projects.at(-1);
+  const libraryDocument = (
+    await json(`/api/projects/${imageLibrary.id}`, null, "GET")
+  ).data;
+  assert.equal(libraryDocument.project.assets.length, 2);
+  assert.equal(libraryDocument.project.clips.length, 0);
+  assert.ok(
+    libraryDocument.project.assets.every(
+      (a) => a.kind === "image" && a.width === 160 && a.height === 120,
+    ),
+  );
+  ok(
+    "Deleted uncertain save stays deleted; a fresh save ID succeeds without losing image-only edits",
+  );
+  await images.evaluate(() => {
+    const asset = document.querySelector(".asset-card"),
+      row = document.querySelector(".timeline-track-row");
+    const dataTransfer = new DataTransfer();
+    asset.dispatchEvent(
+      new DragEvent("dragstart", { bubbles: true, dataTransfer }),
+    );
+    const rect = row.getBoundingClientRect();
+    row.dispatchEvent(
+      new DragEvent("drop", {
+        bubbles: true,
+        dataTransfer,
+        clientX: rect.left + 48,
+        clientY: rect.top + 20,
+      }),
+    );
+  });
+  await images.waitForSelector(".timeline-clip");
+  await images.getByRole("button", { name: "新しい保存版を保存" }).click();
+  await waitIdle(images);
+  const imageTimeline = (
+    await json("/api/projects", null, "GET")
+  ).data.projects.at(-1);
+  await images
+    .getByRole("button", { name: "編集終了・素材解放", exact: true })
+    .click();
+  await images.waitForFunction(
+    () => document.querySelectorAll(".asset-card").length === 0,
+  );
+  await images.waitForLoadState("networkidle");
+  await stop();
+  await start();
+  await images.reload();
+  await images.getByText(/サーバーの保存版/).click();
+  await images
+    .locator(".project-revision")
+    .last()
+    .getByRole("button", { name: "読み込み", exact: true })
+    .click();
+  await waitIdle(images);
+  await images.waitForSelector(".timeline-clip");
+  assert.equal(await images.locator(".asset-card img").count(), 2);
+  const imageDownload = images.waitForEvent("download", { timeout: 120000 });
+  await images.getByTitle("全体書き出し (Ctrl+E)", { exact: true }).click();
+  await (await imageDownload).saveAs(`${evidence}/image-roundtrip.mp4`);
+  await waitIdle(images);
+  const imageProbe = JSON.parse(
+    execFileSync(
+      "/usr/bin/ffprobe",
+      [
+        "-v",
+        "error",
+        "-show_format",
+        "-show_streams",
+        "-of",
+        "json",
+        `${evidence}/image-roundtrip.mp4`,
+      ],
+      { encoding: "utf8" },
+    ),
+  );
+  assert.ok(imageProbe.streams.some((s) => s.codec_type === "video"));
+  assert.equal(
+    (await json(`/api/projects/${imageTimeline.id}`, null, "GET")).status,
+    200,
+  );
+  await images.screenshot({
+    path: `${evidence}/loaded-images.png`,
+    fullPage: true,
+  });
+  ok(
+    "Real PNG/JPEG library and image clip survive save, tab release, server restart, reload and ffmpeg export",
+  );
   assert.deepEqual(runtimeErrors, []);
   await browser.close();
   browser = null;
