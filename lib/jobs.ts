@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { reserveStorage, finishStorageJob, pruneAllStorage, type StorageReservation } from "@/lib/storageRetention";
 import { JOBS_ROOT } from "@/lib/paths";
 
 export type JobStatus = "pending" | "running" | "done" | "error";
@@ -28,6 +29,20 @@ export type JobRecord = {
 };
 
 const jobs = new Map<string, JobRecord>();
+const writes = new Map<string, Promise<void>>();
+function queuePersist(rec: JobRecord) {
+  const next = (writes.get(rec.id) ?? Promise.resolve()).then(() => persistJob(rec));
+  writes.set(rec.id, next);
+}
+export async function createRetainedJobRecord(kind: JobKind, options: {
+  sessionId?: string; dependencies: string[]; transient?: boolean; assetId?: string;
+}) {
+  const id = randomUUID();
+  await reserveStorage([{ id, kind: "jobs", active: true, dependencies: options.dependencies,
+    transient: options.transient } satisfies StorageReservation], options.sessionId);
+  return createJobRecord(kind, { id, assetId: options.assetId });
+}
+
 
 async function persistJob(rec: JobRecord): Promise<void> {
   try {
@@ -49,7 +64,7 @@ async function loadPersistedJob(jobId: string): Promise<JobRecord | null> {
 }
 
 export function createJobRecord(kind: JobRecord["kind"], extra?: Partial<JobRecord>): JobRecord {
-  const id = randomUUID();
+  const id = extra?.id ?? randomUUID();
   const rec: JobRecord = {
     id,
     kind,
@@ -58,7 +73,7 @@ export function createJobRecord(kind: JobRecord["kind"], extra?: Partial<JobReco
     ...extra,
   };
   jobs.set(id, rec);
-  void persistJob(rec);
+  queuePersist(rec);
   return rec;
 }
 
@@ -79,7 +94,7 @@ export function patchJobRecord(jobId: string, patch: Partial<JobRecord>): void {
   if (!cur) return;
   const next = { ...cur, ...patch };
   jobs.set(jobId, next);
-  void persistJob(next);
+  queuePersist(next);
 }
 
 /** テストのみ: in-memory のジョブ一覧をクリアします。 */
@@ -113,6 +128,12 @@ export function runDetached(jobId: string, fn: () => Promise<void>): void {
         status: "error",
         error: e instanceof Error ? e.message : String(e),
       });
+    } finally {
+      // Flush metadata before making a directory eligible for collection.
+      // A late write must never resurrect a directory after it was collected.
+      await writes.get(jobId);
+      try { await finishStorageJob(jobId); await pruneAllStorage([]); }
+      catch { /* fail closed: durable active state remains protected */ }
     }
   })();
 }

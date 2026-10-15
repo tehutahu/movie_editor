@@ -36,6 +36,8 @@ import {
   fitClipTransformToCanvas,
 } from "@/lib/editor/compositor";
 import type { AppliedJobStep, Asset, ClipTransform, EditorProject } from "@/lib/editor/types";
+import { storageReferences } from "@/lib/editor/storageReferences";
+import { selectedClipExportRequest } from "@/lib/editor/selectedClipExport";
 
 type JobPollInfo = {
   jobId: string;
@@ -75,6 +77,7 @@ export function useEditorStore() {
     createCommandHistory(createEmptyProject()),
   );
   const [busy, setBusy] = useState<string | null>(null);
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [liveJob, setLiveJob] = useState<JobPollInfo | null>(null);
   const [jobPhase, setJobPhase] = useState<string | null>(null);
@@ -83,6 +86,32 @@ export function useEditorStore() {
   const [sampleRateHz, setSampleRateHz] = useState("44100");
   const [timelineZoom, setTimelineZoom] = useState(1);
   const [clipExportBusyId, setClipExportBusyId] = useState<string | null>(null);
+
+  const sessionRef = useRef<string | null>(null);
+  const sessionId = useCallback(() => sessionRef.current ??= crypto.randomUUID(), []);
+  const protectReferences = useCallback(async (keepIds: string[]) => {
+    const res = await fetch("/api/storage/session", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "protect", sessionId: sessionId(), keepIds }),
+    });
+    if (!res.ok) { const json = await res.json(); throw new Error(json.error ?? "素材の保護に失敗しました。"); }
+  }, [sessionId]);
+  const referenceKey = JSON.stringify(storageReferences(history).sort());
+  useEffect(() => {
+    void protectReferences(JSON.parse(referenceKey)).catch(e => setStorageWarning(String(e)));
+  }, [referenceKey, protectReferences]);
+  const finishEditing = useCallback(async () => {
+    if (!window.confirm("現在の編集内容・素材一覧・Undo/Redo履歴を破棄し、このタブの素材保護を解放します。よろしいですか？")) return;
+    // Discard references before releasing them. A failed release retains files.
+    setBusy("素材の保護を解放中…");
+    setHistory(createCommandHistory(createEmptyProject()));
+    try {
+      const res = await fetch("/api/storage/session", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "release", sessionId: sessionId() }) });
+      if (!res.ok) { const json = await res.json(); throw new Error(json.error ?? "素材解放に失敗しました。"); }
+      window.location.reload();
+    } catch (e) { setError(String(e)); setBusy(null); }
+  }, [sessionId]);
 
   const audioVideoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -168,13 +197,17 @@ export function useEditorStore() {
   const uploadAssets = useCallback(async (files: FileList | File[]) => {
     setError(null);
     setBusy("アップロード中…");
+    // The input clears its live FileList as soon as this handler yields.
+    const list = Array.from(files);
     try {
+      await protectReferences(storageReferences(history));
       const fd = new FormData();
-      const list = files instanceof FileList ? [...files] : files;
+      fd.append("editorSessionId", sessionId());
       for (const f of list) fd.append("files", f);
 
       const res = await fetch("/api/assets", { method: "POST", body: fd });
       const json = (await res.json()) as {
+        warning?: string;
         assets?: {
           assetId: string;
           kind: "video" | "image";
@@ -190,6 +223,7 @@ export function useEditorStore() {
       };
       if (!res.ok) throw new Error(json.error ?? "アップロードに失敗しました。");
 
+      setStorageWarning(json.warning ?? null);
       const newAssets: Asset[] = (json.assets ?? []).map((a) => ({
         id: a.assetId,
         kind: a.kind,
@@ -219,7 +253,7 @@ export function useEditorStore() {
     } finally {
       setBusy(null);
     }
-  }, []);
+  }, [history, protectReferences, sessionId]);
 
   const addClipFromAsset = useCallback(
     (asset: Asset, trackId: string, startSec: number) => {
@@ -389,6 +423,7 @@ export function useEditorStore() {
         : "書き出し中…",
     );
     try {
+      await protectReferences(storageReferences(history));
       for (let i = 0; i < clipIds.length; i++) {
         const clipId = clipIds[i]!;
         const clip = cur.clips.find((c) => c.id === clipId);
@@ -397,21 +432,11 @@ export function useEditorStore() {
         setBusy(`選択クリップを書き出し中… (${i + 1}/${clipIds.length})`);
         setClipExportBusyId(clipId);
 
-        const part = clip.parts[0];
-        if (!part) throw new Error("クリップに素材がありません。");
-        const asset = cur.assets.find((a) => a.id === part.assetId);
-        if (!asset) throw new Error("素材が見つかりません。");
-
-        const res = await fetch("/api/jobs/export-segment", {
+        const request = selectedClipExportRequest(cur, clip);
+        const res = await fetch(request.url, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            videoId: part.assetId,
-            sourceJobId: asset.sourceJobId,
-            startSec: part.sourceInSec,
-            endSec: part.sourceInSec + clip.durationSec,
-            exportBaseName: sanitizeExportBaseName(cur.exportBaseName),
-          }),
+          body: JSON.stringify({ ...request.body, editorSessionId: sessionId() }),
         });
         const json = (await res.json()) as { jobId?: string; error?: string };
         if (!res.ok) throw new Error(json.error ?? "書き出しに失敗しました。");
@@ -445,7 +470,7 @@ export function useEditorStore() {
       setLiveJob(null);
       setJobPhase(null);
     }
-  }, [history]);
+  }, [history, protectReferences, sessionId]);
 
   const downloadSelectedClip = useCallback(async () => {
     await exportSelectedClips();
@@ -480,10 +505,12 @@ export function useEditorStore() {
     setBusy("速度復元中…");
     setJobPhase("restore:queued");
     try {
+      await protectReferences(storageReferences(history));
       const res = await fetch("/api/jobs/restore", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          editorSessionId: sessionId(),
           videoId: asset.id,
           sourceJobId: asset.sourceJobId,
           speedFactor: factor,
@@ -531,7 +558,7 @@ export function useEditorStore() {
       setLiveJob(null);
       setJobPhase(null);
     }
-  }, [history, speedFactor, sampleRateHz]);
+  }, [history, speedFactor, sampleRateHz, protectReferences, sessionId]);
 
   const exportComposition = useCallback(async () => {
     setError(null);
@@ -544,10 +571,12 @@ export function useEditorStore() {
     setBusy("書き出し中…");
     setJobPhase("composition:queued");
     try {
+      await protectReferences(storageReferences(history));
       const res = await fetch("/api/jobs/export-composition", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          editorSessionId: sessionId(),
           assets: cur.assets,
           tracks: cur.tracks,
           clips: cur.clips,
@@ -587,7 +616,7 @@ export function useEditorStore() {
       setLiveJob(null);
       setJobPhase(null);
     }
-  }, [history]);
+  }, [history, protectReferences, sessionId]);
 
   useEffect(() => {
     function isEditableTarget(target: EventTarget | null): boolean {
@@ -663,6 +692,8 @@ export function useEditorStore() {
     project,
     busy,
     error,
+    storageWarning,
+    finishEditing,
     liveJob,
     jobPhase,
     appliedJobSteps,

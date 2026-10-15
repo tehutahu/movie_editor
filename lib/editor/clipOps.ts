@@ -317,29 +317,32 @@ export function resizeClip(
 ): EditorProject | null {
   const clip = project.clips.find((c) => c.id === clipId);
   if (!clip) return null;
+  if (!Number.isFinite(newDurationSec) || clip.parts.length === 0) return null;
   const dur = Math.max(MIN_CLIP_DURATION_SEC, newDurationSec);
-
+  const parts: ClipPart[] = [];
+  let remaining = dur;
+  for (const part of clip.parts) {
+    if (remaining <= 1e-9) break;
+    const length = Math.min(partDuration(part), remaining);
+    parts.push({ ...part, sourceOutSec: part.sourceInSec + length });
+    remaining -= length;
+  }
+  // Extension continues only the last remaining source. Discarded parts can
+  // be recovered with Undo; resizing never invents or substitutes media.
+  if (remaining > 1e-9) {
+    const last = parts[parts.length - 1]!;
+    const asset = findAsset(assets, last.assetId);
+    const available = asset?.kind === "image"
+      ? remaining
+      : Math.max(0, (asset?.sourceDurationSec ?? last.sourceOutSec) - last.sourceOutSec);
+    last.sourceOutSec += Math.min(remaining, available);
+  }
   const next = cloneProject(project);
-  next.clips = next.clips.map((c) => {
-    if (c.id !== clipId) return c;
-    const asset = findAsset(assets, c.parts[0]?.assetId ?? "");
-    if (asset?.kind === "image") {
-      return {
-        ...c,
-        durationSec: dur,
-        parts: [{ assetId: asset.id, sourceInSec: 0, sourceOutSec: dur }],
-      };
-    }
-    const part = c.parts[0];
-    if (!part) return { ...c, durationSec: dur };
-    const maxSource = asset?.sourceDurationSec ?? part.sourceOutSec;
-    const newOut = Math.min(part.sourceInSec + dur, maxSource);
-    return {
-      ...c,
-      durationSec: newOut - part.sourceInSec,
-      parts: [{ ...part, sourceOutSec: newOut }],
-    };
-  });
+  next.clips = next.clips.map((c) => c.id === clipId ? {
+    ...c,
+    durationSec: parts.reduce((sum, part) => sum + partDuration(part), 0),
+    parts,
+  } : c);
   next.compositionDurationSec = computeCompositionDuration(next.clips);
   return next;
 }

@@ -132,8 +132,7 @@ export function resolveAudioTrackForExport(project: EditorProject): Track | unde
   for (const track of tracks) {
     const hasVideo = project.clips.some((clip) => {
       if (clip.trackId !== track.id) return false;
-      const asset = findAsset(project.assets, clip.parts[0]?.assetId ?? "");
-      return asset?.kind === "video";
+      return clip.parts.some((part) => findAsset(project.assets, part.assetId)?.kind === "video");
     });
     if (hasVideo) return track;
   }

@@ -1,7 +1,8 @@
+import { storageRetentionStatus, reserveStorage, finishStorageJob, cancelStorageReservations, StorageRetentionError } from "@/lib/storageRetention";
 import { NextResponse } from "next/server";
 import { displayNameFromOriginalFilename } from "@/lib/exportName";
 import { assertFfmpegAvailable, probeVideo } from "@/lib/ffmpeg";
-import { createJobRecord, patchJobRecord, runDetached } from "@/lib/jobs";
+import { createRetainedJobRecord, patchJobRecord, runDetached } from "@/lib/jobs";
 import { generateFilmstrip } from "@/lib/ffmpeg";
 import { getMediaStorage } from "@/lib/storage";
 import {
@@ -20,7 +21,14 @@ import { ensureJobDir } from "@/lib/storage";
 export const runtime = "nodejs";
 
 async function runThumbnailJob(assetId: string, inputPath: string, durationSec: number) {
-  const job = createJobRecord("thumbnails", { assetId });
+  let job;
+  try {
+    job = await createRetainedJobRecord("thumbnails", { assetId, dependencies: [assetId], transient: true });
+  } catch (e) {
+    // Thumbnails are optional; lack of job slots must not invalidate a saved asset.
+    if (e instanceof StorageRetentionError && e.status === 507) return undefined;
+    throw e;
+  }
   runDetached(job.id, async () => {
     patchJobRecord(job.id, { currentStep: "filmstrip" });
     const storage = getMediaStorage();
@@ -40,6 +48,7 @@ async function runThumbnailJob(assetId: string, inputPath: string, durationSec: 
 
 /** Upload one or more assets (video/image). FormData: `file` or multiple `files`. */
 export async function POST(req: Request) {
+  let reservedIds: string[] = [];
   try {
     await ensureStorageTrees();
     await assertFfmpegAvailable();
@@ -56,6 +65,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "file または files が必要です。" }, { status: 400 });
     }
 
+    // Validate the entire batch before reserving slots or writing any files.
+    for (const file of files) {
+      if (!parseAllowedAssetExtension(file.name)) return NextResponse.json({ error: `未対応の拡張子: ${file.name}` }, { status: 400 });
+      if (file.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: `ファイルサイズが上限を超えています: ${file.name}` }, { status: 413 });
+    }
+    const rawSession = form.get("editorSessionId");
+    const sessionId = typeof rawSession === "string" ? rawSession : undefined;
+    const ids = files.map(() => newVideoId());
+    await reserveStorage(ids.map(id => ({ id, kind: "uploads", active: true })), sessionId);
+    reservedIds = ids;
     const storage = getMediaStorage();
     const results: {
       assetId: string;
@@ -70,7 +89,7 @@ export async function POST(req: Request) {
       thumbnailJobId?: string;
     }[] = [];
 
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
       const parsed = parseAllowedAssetExtension(file.name);
       if (!parsed) {
         return NextResponse.json(
@@ -87,7 +106,7 @@ export async function POST(req: Request) {
       }
 
       const buf = new Uint8Array(await file.arrayBuffer());
-      const assetId = newVideoId();
+      const assetId = ids[index]!;
       const displayName = displayNameFromOriginalFilename(file.name);
 
       await storage.saveAsset({
@@ -132,11 +151,14 @@ export async function POST(req: Request) {
       });
     }
 
-    return NextResponse.json({ assets: results });
+    await Promise.all(ids.map(finishStorageJob));
+    reservedIds = [];
+    return NextResponse.json({ assets: results, ...(await storageRetentionStatus()) });
   } catch (e) {
+    if (reservedIds.length) await cancelStorageReservations(reservedIds).catch(() => undefined);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
+      { status: e instanceof StorageRetentionError ? e.status : 500 },
     );
   }
 }

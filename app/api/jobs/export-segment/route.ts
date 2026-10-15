@@ -1,8 +1,9 @@
+import { StorageRetentionError } from "@/lib/storageRetention";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { assertFfmpegAvailable, extractSegmentTimes, probeVideo } from "@/lib/ffmpeg";
 import {
-  createJobRecord,
+  createRetainedJobRecord,
   patchJobRecord,
   runDetached,
 } from "@/lib/jobs";
@@ -20,6 +21,7 @@ export const runtime = "nodejs";
 
 type Body = {
   videoId?: string;
+  editorSessionId?: string;
   sourceJobId?: string;
   startSec?: number;
   endSec?: number;
@@ -64,7 +66,10 @@ export async function POST(req: Request) {
     const exportBase = sanitizeExportBaseName(
       parseExportBaseName(body.exportBaseName) ?? "video",
     );
-    const job = createJobRecord("export_segment");
+    const job = await createRetainedJobRecord("export_segment", {
+      sessionId: body.editorSessionId,
+      dependencies: [videoId, ...(body.sourceJobId ? [body.sourceJobId] : [])],
+    });
     patchJobRecord(job.id, {
       downloadName: buildDownloadFilename(
         exportBase,
@@ -97,7 +102,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
-      { status: 400 },
+      { status: e instanceof StorageRetentionError ? e.status : 400 },
     );
   }
 }

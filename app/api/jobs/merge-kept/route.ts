@@ -1,3 +1,4 @@
+import { StorageRetentionError } from "@/lib/storageRetention";
 import path from "node:path";
 import { readdir, unlink, writeFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
@@ -9,7 +10,7 @@ import {
   probeVideo,
 } from "@/lib/ffmpeg";
 import {
-  createJobRecord,
+  createRetainedJobRecord,
   patchJobRecord,
   runDetached,
 } from "@/lib/jobs";
@@ -28,6 +29,7 @@ export const runtime = "nodejs";
 
 type Body = {
   videoId?: string;
+  editorSessionId?: string;
   /** 指定時はこのジョブの成果ファイルを入力にします（完了済みのみ）。 */
   sourceJobId?: string;
   /** 動画から「削除」する区間（秒）。残りを結合します。 */
@@ -85,7 +87,10 @@ export async function POST(req: Request) {
     const exportBase = sanitizeExportBaseName(
       parseExportBaseName(body.exportBaseName) ?? "video",
     );
-    const job = createJobRecord("merge_kept");
+    const job = await createRetainedJobRecord("merge_kept", {
+      sessionId: body.editorSessionId,
+      dependencies: [videoId, ...(body.sourceJobId ? [body.sourceJobId] : [])],
+    });
     patchJobRecord(job.id, {
       downloadName: buildDownloadFilename(exportBase, "merged", "mp4"),
       currentStep: "segment",
@@ -158,7 +163,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
-      { status: 400 },
+      { status: e instanceof StorageRetentionError ? e.status : 400 },
     );
   }
 }

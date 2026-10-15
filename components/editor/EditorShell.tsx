@@ -43,6 +43,8 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
     matchCompositionToSelectedClip,
     busy,
     error,
+    storageWarning,
+    finishEditing,
     liveJob,
     jobPhase,
   } = editor;
@@ -124,6 +126,8 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
         </p>
       </header>
 
+      <button type="button" className="storage-release" onClick={() => void finishEditing()} disabled={Boolean(busy)} title="このタブの編集・素材一覧・履歴を破棄し、不要になったサーバー素材を整理します">編集終了・素材解放</button>
+      {storageWarning ? <p role="status" className="storage-notice">{storageWarning}</p> : null}
       {error ? <p className="error-banner">{error}</p> : null}
       {busy ? <p className="busy-banner">{busy}</p> : null}
       {liveJob ? (

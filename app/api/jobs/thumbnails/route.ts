@@ -1,7 +1,8 @@
+import { StorageRetentionError } from "@/lib/storageRetention";
 import { NextResponse } from "next/server";
 import { resolveAssetInputPath } from "@/lib/assetResolve";
 import { assertFfmpegAvailable, generateFilmstrip, probeVideo } from "@/lib/ffmpeg";
-import { createJobRecord, patchJobRecord, runDetached } from "@/lib/jobs";
+import { createRetainedJobRecord, patchJobRecord, runDetached } from "@/lib/jobs";
 import { getMediaStorage } from "@/lib/storage";
 import { ensureJobDir } from "@/lib/storage";
 import { assertStorageId } from "@/lib/validation";
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
     }
 
     const probe = await probeVideo(inputPath);
-    const job = createJobRecord("thumbnails", { assetId: body.assetId });
+    const job = await createRetainedJobRecord("thumbnails", { assetId: body.assetId, dependencies: [body.assetId], transient: true });
     const storage = getMediaStorage();
 
     runDetached(job.id, async () => {
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
+      { status: e instanceof StorageRetentionError ? e.status : 500 },
     );
   }
 }

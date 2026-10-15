@@ -147,3 +147,15 @@ describe("formatFfmpegFilterNumber", () => {
     expect(() => formatFfmpegFilterNumber("1")).toThrow();
   });
 });
+
+// Inconsistent durations must not become truncated or frozen successful output.
+it("rejects clip duration differing from the sum of its parts", () => {
+  const assetId = "550e8400-e29b-41d4-a716-446655440000";
+  const trackId = "550e8400-e29b-41d4-a716-446655440001";
+  expect(() => parseCompositionExportPayload({
+    assets: [{ id: assetId, kind: "video", ext: "mp4", displayName: "a" }],
+    tracks: [{ id: trackId, order: 0 }], compositionDurationSec: 3,
+    clips: [{ id: "550e8400-e29b-41d4-a716-446655440002", trackId, timelineStartSec: 0, durationSec: 3,
+      parts: [{ assetId, sourceInSec: 0, sourceOutSec: 2 }], transform: { x: .5, y: .5, scale: 1 } }],
+  })).toThrow(/一致/);
+});

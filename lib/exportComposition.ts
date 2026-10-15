@@ -1,5 +1,4 @@
 import type { Asset, Clip, EditorProject, Track } from "@/lib/editor/types";
-import { resolveAssetInputPath } from "@/lib/assetResolve";
 import {
   clipsForExportComposition,
   COMPOSITION_BG_FFMPEG,
@@ -7,15 +6,9 @@ import {
   resolveAudioTrackForExport,
   transformToPixelRect,
 } from "@/lib/editor/compositor";
-import {
-  buildConcatDemuxerListFile,
-  concatViaDemuxer,
-  extractSegmentTimes,
-  imageToVideoSegment,
-  probeVideo,
-  runFfmpegCommand,
-} from "@/lib/ffmpeg";
-import { writeFile, unlink } from "node:fs/promises";
+import { probeVideo, runFfmpegCommand } from "@/lib/ffmpeg";
+import { renderClipToFile } from "@/lib/renderClip";
+import { unlink } from "node:fs/promises";
 import path from "node:path";
 
 const MAX_FFMPEG_FILTER_INT = 100_000;
@@ -43,113 +36,12 @@ function formatFfmpegFilterInt(value: number): string {
   return String(value);
 }
 
-type ExportClipInput = {
-  clip: Clip;
-  asset: Asset;
-  inputPath: string;
-};
-
 type PreparedClip = {
   path: string;
   clip: Clip;
-  asset: Asset;
   inputIndex: number;
   rect: ReturnType<typeof transformToPixelRect>;
 };
-
-async function renderClipPartSegment(
-  jobDir: string,
-  clipIndex: number,
-  partIndex: number,
-  asset: Asset,
-  part: Clip["parts"][number],
-  inputPath: string,
-): Promise<string> {
-  const outPath = path.join(
-    jobDir,
-    `part_${String(clipIndex).padStart(3, "0")}_${partIndex}.mp4`,
-  );
-  const duration = part.sourceOutSec - part.sourceInSec;
-
-  if (asset.kind === "image") {
-    await imageToVideoSegment({
-      inputPath,
-      outputPath: outPath,
-      durationSec: duration,
-    });
-    return outPath;
-  }
-
-  await extractSegmentTimes({
-    inputPath,
-    outputPath: outPath,
-    startSec: part.sourceInSec,
-    endSec: part.sourceOutSec,
-  });
-  return outPath;
-}
-
-async function renderClipToPart(
-  jobDir: string,
-  index: number,
-  item: ExportClipInput,
-  assets: readonly Asset[],
-): Promise<string> {
-  const outPath = path.join(jobDir, `part_${String(index).padStart(3, "0")}.mp4`);
-
-  if (item.clip.parts.length === 1) {
-    const part = item.clip.parts[0]!;
-    const duration = item.clip.durationSec;
-
-    if (item.asset.kind === "image") {
-      await imageToVideoSegment({
-        inputPath: item.inputPath,
-        outputPath: outPath,
-        durationSec: duration,
-      });
-      return outPath;
-    }
-
-    await extractSegmentTimes({
-      inputPath: item.inputPath,
-      outputPath: outPath,
-      startSec: part.sourceInSec,
-      endSec: part.sourceInSec + duration,
-    });
-    return outPath;
-  }
-
-  const segmentPaths: string[] = [];
-  for (let pi = 0; pi < item.clip.parts.length; pi++) {
-    const part = item.clip.parts[pi]!;
-    const asset = assets.find((a) => a.id === part.assetId);
-    if (!asset) continue;
-    const inputPath = await resolveAssetInputPath(asset);
-    if (!inputPath) continue;
-    segmentPaths.push(
-      await renderClipPartSegment(jobDir, index, pi, asset, part, inputPath),
-    );
-  }
-
-  if (segmentPaths.length === 0) {
-    throw new Error("クリップのパートを書き出せませんでした。");
-  }
-  if (segmentPaths.length === 1) {
-    const { copyFile } = await import("node:fs/promises");
-    await copyFile(segmentPaths[0]!, outPath);
-    return outPath;
-  }
-
-  const listPath = path.join(jobDir, `part_${String(index).padStart(3, "0")}_concat.txt`);
-  await writeFile(listPath, buildConcatDemuxerListFile(segmentPaths), "utf8");
-  const probe = await probeVideo(segmentPaths[0]!);
-  await concatViaDemuxer({
-    listTxtAbsolutePath: listPath,
-    outputPath: outPath,
-    outputHasAudio: probe.hasAudio,
-  });
-  return outPath;
-}
 
 async function prepareCompositionClips(
   project: EditorProject,
@@ -161,21 +53,14 @@ async function prepareCompositionClips(
   const prepared: PreparedClip[] = [];
   let partIndex = 0;
 
-  for (const { clip, asset } of sorted) {
-    const inputPath = await resolveAssetInputPath(asset);
-    if (!inputPath) continue;
-
-    const rendered = await renderClipToPart(
-      jobDir,
-      partIndex++,
-      { clip, asset, inputPath },
-      project.assets,
-    );
+  for (const { clip } of sorted) {
+    const rendered = path.join(jobDir, `part_${partIndex++}.mp4`);
+    await renderClipToFile({ clip, assets: project.assets, jobDir,
+      outputPath: rendered, width: compW, height: compH });
 
     prepared.push({
       path: rendered,
       clip,
-      asset,
       inputIndex: prepared.length + 1,
       rect: transformToPixelRect(clip.transform, compW, compH),
     });
@@ -227,7 +112,7 @@ async function buildCompositionAudioFilterGraph(
 
   for (const p of prepared) {
     if (!audioClipIds.has(p.clip.id)) continue;
-    if (p.asset.kind !== "video") continue;
+
     const probe = await probeVideo(p.path);
     if (!probe.hasAudio) continue;
     const label = `ad${p.inputIndex}`;
