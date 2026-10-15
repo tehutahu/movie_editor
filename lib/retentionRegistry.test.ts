@@ -5,7 +5,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 const roots = vi.hoisted(() => { vi.resetModules(); return { UPLOADS_ROOT: "", JOBS_ROOT: "" }; });
 vi.mock("@/lib/paths", () => roots);
-import { reserveStorage, finishStorageJob, releaseStorageSession, protectStorageSession, pruneAllStorage, StorageRetentionError } from "./storageRetention";
+import { reserveStorage, finishStorageJob, releaseStorageSession, protectStorageSession, pruneAllStorage, cancelStorageReservations, StorageRetentionError } from "./storageRetention";
 let root: string;
 const id = () => randomUUID();
 async function file(resource: string, kind = "uploads") { const dir = path.join(root, kind, resource); await mkdir(dir, { recursive: true }); await writeFile(path.join(dir, "test"), "synthetic"); }
@@ -67,6 +67,15 @@ it("an abandoned filesystem lock blocks cleanup and admission without expiry", a
 it("remote originals remain conservatively accounted for after release instead of bypassing the limit", async () => {
  vi.stubEnv("STORAGE_DRIVER","blob");vi.stubEnv("MAX_UPLOAD_COUNT","1");
  const session=id();await reserveStorage([{id:id(),kind:"uploads"}],session);
+ await releaseStorageSession(session);
+ await expect(reserveStorage([{id:id(),kind:"uploads"}],id())).rejects.toThrow(/上限/);
+});
+
+it("a failed remote upload keeps its reservation because the original may already exist", async () => {
+ vi.stubEnv("STORAGE_DRIVER","blob");vi.stubEnv("MAX_UPLOAD_COUNT","1");
+ const session=id(), resource=id();
+ await reserveStorage([{id:resource,kind:"uploads",active:true}],session);
+ await cancelStorageReservations([resource]);
  await releaseStorageSession(session);
  await expect(reserveStorage([{id:id(),kind:"uploads"}],id())).rejects.toThrow(/上限/);
 });

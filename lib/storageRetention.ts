@@ -29,6 +29,7 @@ export type StorageReservation = { id: string; kind: Entry["kind"]; active?: boo
 // or a previous process crashed during a retention transaction.
 const globalState = globalThis as typeof globalThis & { __movieRetentionLocks?: Map<string, Promise<unknown>> };
 const locks = globalState.__movieRetentionLocks ??= new Map();
+function usesBlobStorage() { return process.env.STORAGE_DRIVER?.toLowerCase() === "blob" || Boolean(process.env.BLOB_READ_WRITE_TOKEN); }
 function registryPath() { return path.join(path.dirname(UPLOADS_ROOT), "retention.json"); }
 function validId(id: string) { return assertStorageId("storageId", id); }
 async function load(): Promise<Registry> {
@@ -148,7 +149,7 @@ export function reserveStorage(resources: StorageReservation[], sessionId?: stri
     for (const resource of resources) {
       if (r.entries[resource.id]) throw new StorageRetentionError("保存IDが重複しています。", 409);
       r.entries[resource.id] = { kind: resource.kind, owners: sessionId ? [sessionId] : [], active: resource.active ?? false,
-        unknown: (!sessionId && !resource.transient) || (resource.kind === "uploads" && (process.env.STORAGE_DRIVER?.toLowerCase() === "blob" || Boolean(process.env.BLOB_READ_WRITE_TOKEN))), dependencies: resource.dependencies ?? [] };
+        unknown: (!sessionId && !resource.transient) || (resource.kind === "uploads" && usesBlobStorage()), dependencies: resource.dependencies ?? [] };
     }
     await save(r);
   });
@@ -179,7 +180,15 @@ export function finishStorageJob(id: string) {
 export function cancelStorageReservations(ids: readonly string[]) {
   return transaction(async r => {
     // Only the failed request's newly allocated IDs may be discarded.
-    for (const id of ids) if (r.entries[id]) { r.entries[id].active = false; r.entries[id].unknown = false; r.entries[id].owners = []; }
+    for (const id of ids) {
+      const entry = r.entries[id];
+      if (!entry) continue;
+      entry.active = false;
+      // A failed put/probe does not prove that the Blob original was removed.
+      // Keep even unwritten reservations until an operator can verify them.
+      entry.unknown = entry.kind === "uploads" && usesBlobStorage();
+      entry.owners = [];
+    }
     await save(r); await collect(r); await save(r);
   });
 }
