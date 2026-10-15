@@ -201,8 +201,12 @@ CI では ffmpeg をインストールせず、Vitest は API をモックで検
 実ffmpegの回帰テスト（通常テストでは実行しません）:
 
 ```bash
-RUN_FFMPEG_TESTS=1 FFMPEG_PATH=/usr/bin/ffmpeg FFPROBE_PATH=/usr/bin/ffprobe npm test -- lib/exportComposition.regression.test.ts
+RUN_FFMPEG_TESTS=1 FFMPEG_PATH=/usr/bin/ffmpeg FFPROBE_PATH=/usr/bin/ffprobe npm test -- lib/exportComposition.regression.test.ts lib/exportComposition.timing.test.ts
 ```
+
+合成書き出しでは素材映像のPTSをタイムライン配置時刻へ揃え、表示区間は開始時刻を含み終了時刻を含みません。画面外へ移動・拡大したクリップはプレビューと同様にクロップします（中心座標は有限数、倍率は0.2〜3）。音声の配置遅延はAPIで許可する24時間までのコンポジションに対応します。
+
+`exportComposition.timing.test.ts` は隔離した320×320の色・音切替素材を使い、0秒/途中開始、隣接境界、複数トラック、結合クリップ、負座標、99.999/100/100.001/101/180.25秒配置の出力長・フレーム内容・音声を実ffmpeg/ffprobeで検証します。24時間上限は全長動画を生成せず単体テストで検証します。
 
 ## 保存・読み込みの実ブラウザ検証
 

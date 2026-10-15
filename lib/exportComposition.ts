@@ -2,10 +2,12 @@ import type { Asset, Clip, EditorProject, Track } from "@/lib/editor/types";
 import {
   clipsForExportComposition,
   COMPOSITION_BG_FFMPEG,
+  MAX_CLIP_SCALE,
   getCompositionSize,
   resolveAudioTrackForExport,
   transformToPixelRect,
 } from "@/lib/editor/compositor";
+import { MAX_COMPOSITION_DURATION_SEC } from "@/lib/editor/validateExportProject";
 import { probeVideo, runFfmpegCommand } from "@/lib/ffmpeg";
 import { renderClipToFile } from "@/lib/renderClip";
 import { unlink } from "node:fs/promises";
@@ -26,11 +28,15 @@ export function formatFfmpegFilterNumber(value: number): string {
   return s;
 }
 
-function formatFfmpegFilterInt(value: number): string {
+function formatFfmpegFilterInt(
+  value: number,
+  min = 0,
+  max = MAX_FFMPEG_FILTER_INT,
+): string {
   if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) {
     throw new Error("ffmpeg フィルタ整数が不正です。");
   }
-  if (value < 0 || value > MAX_FFMPEG_FILTER_INT) {
+  if (value < min || value > max) {
     throw new Error("ffmpeg フィルタ整数が範囲外です。");
   }
   return String(value);
@@ -62,7 +68,14 @@ async function prepareCompositionClips(
       path: rendered,
       clip,
       inputIndex: prepared.length + 1,
-      rect: transformToPixelRect(clip.transform, compW, compH),
+      // UI moves may put the centre outside the canvas. Saturate only far
+      // off-screen positions, where the entire layer is already invisible,
+      // so finite UI coordinates cannot overflow ffmpeg's integer expressions.
+      rect: transformToPixelRect({
+        ...clip.transform,
+        x: Math.max(-MAX_CLIP_SCALE, Math.min(1 + MAX_CLIP_SCALE, clip.transform.x)),
+        y: Math.max(-MAX_CLIP_SCALE, Math.min(1 + MAX_CLIP_SCALE, clip.transform.y)),
+      }, compW, compH),
     });
   }
 
@@ -85,10 +98,10 @@ function buildCompositionVideoFilterGraph(prepared: readonly PreparedClip[]): st
     const start = formatFfmpegFilterNumber(p.clip.timelineStartSec);
     const end = formatFfmpegFilterNumber(p.clip.timelineStartSec + p.clip.durationSec);
     filters.push(
-      `[${p.inputIndex}:v]scale=${formatFfmpegFilterInt(p.rect.w)}:${formatFfmpegFilterInt(p.rect.h)}[${scaled}]`,
+      `[${p.inputIndex}:v]setpts=PTS-STARTPTS+${start}/TB,scale=${formatFfmpegFilterInt(p.rect.w)}:${formatFfmpegFilterInt(p.rect.h)}[${scaled}]`,
     );
     filters.push(
-      `[${currentV}][${scaled}]overlay=${formatFfmpegFilterInt(p.rect.x)}:${formatFfmpegFilterInt(p.rect.y)}:enable='between(t\\,${start}\\,${end})'[${out}]`,
+      `[${currentV}][${scaled}]overlay=${formatFfmpegFilterInt(p.rect.x, -MAX_FFMPEG_FILTER_INT)}:${formatFfmpegFilterInt(p.rect.y, -MAX_FFMPEG_FILTER_INT)}:enable='gte(t\\,${start})*lt(t\\,${end})'[${out}]`,
     );
     currentV = out;
   }
@@ -116,7 +129,9 @@ async function buildCompositionAudioFilterGraph(
     const probe = await probeVideo(p.path);
     if (!probe.hasAudio) continue;
     const label = `ad${p.inputIndex}`;
-    const delayMs = formatFfmpegFilterInt(Math.round(p.clip.timelineStartSec * 1000));
+    const delayMs = formatFfmpegFilterInt(
+      Math.round(p.clip.timelineStartSec * 1000), 0, MAX_COMPOSITION_DURATION_SEC * 1000,
+    );
     filters.push(`[${p.inputIndex}:a]adelay=${delayMs}|${delayMs}[${label}]`);
     audioLabels.push(`[${label}]`);
   }

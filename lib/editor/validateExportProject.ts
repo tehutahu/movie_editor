@@ -109,8 +109,10 @@ export function parseTrack(raw: unknown, index: number): Track {
 function parseTransform(raw: unknown, label: string): ClipTransform {
   const o = assertRecord(label, raw);
   return {
-    x: assertStrictFiniteNumber(`${label}.x`, o.x, { min: 0, max: 1 }),
-    y: assertStrictFiniteNumber(`${label}.y`, o.y, { min: 0, max: 1 }),
+    // Preview dragging permits centres outside the canvas; export clips the
+    // resulting rectangle rather than rejecting those UI positions.
+    x: assertStrictFiniteNumber(`${label}.x`, o.x),
+    y: assertStrictFiniteNumber(`${label}.y`, o.y),
     scale: assertStrictFiniteNumber(`${label}.scale`, o.scale, {
       min: MIN_CLIP_SCALE,
       max: MAX_CLIP_SCALE,

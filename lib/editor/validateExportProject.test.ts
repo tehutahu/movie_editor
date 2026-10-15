@@ -159,3 +159,30 @@ it("rejects clip duration differing from the sum of its parts", () => {
       parts: [{ assetId, sourceInSec: 0, sourceOutSec: 2 }], transform: { x: .5, y: .5, scale: 1 } }],
   })).toThrow(/一致/);
 });
+
+it.each([-.1, 1.1, -1e300, 1e300])("accepts finite off-canvas UI centres %s", (position) => {
+  const payload = validPayload();
+  payload.clips[0]!.transform = { x: position, y: position, scale: 3 };
+  expect(parseCompositionExportPayload(payload).project.clips[0]!.transform.x).toBe(position);
+});
+
+it.each([NaN, Infinity, -Infinity, "0", "0);null", null, undefined])("rejects invalid transform values %s", (value) => {
+  for (const field of ["x", "y", "scale"]) {
+    const payload = validPayload();
+    Object.assign(payload.clips[0]!.transform, { [field]: value });
+    expect(() => parseCompositionExportPayload(payload)).toThrow(/有限の数値/);
+  }
+});
+
+it.each([NaN, Infinity, -Infinity, "100", -1, 86400.001])("rejects invalid placement time %s", (value) => {
+  const payload = validPayload({ compositionDurationSec: 86400 });
+  Object.assign(payload.clips[0]!, { timelineStartSec: value });
+  expect(() => parseCompositionExportPayload(payload)).toThrow();
+});
+
+it("accepts the final permitted placement ending at 24 hours", () => {
+  const payload = validPayload({ compositionDurationSec: 86400 });
+  payload.clips[0]!.timelineStartSec = 86395;
+  expect(parseCompositionExportPayload(payload).project.clips[0]!.timelineStartSec).toBe(86395);
+  expect(() => parseCompositionExportPayload({ ...payload, compositionDurationSec: 86400.001 })).toThrow();
+});
