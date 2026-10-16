@@ -28,7 +28,7 @@ Do not assume these exist when testing or extending the app:
 - **merge-kept UI** — `POST /api/jobs/merge-kept` works but is only wired in the legacy editor, not the NLE.
 - **Track management** — add track only; no delete, reorder, mute, solo, or lock.
 - **Asset management** — no delete/rename in the NLE asset panel.
-- **Advanced editing** — no transitions, effects, text overlays, opacity, volume per clip, ripple/roll trim, copy/paste, or playhead/grid snapping (overlap snap on move only).
+- **Advanced editing** — no transitions, effects, text overlays, opacity, volume per clip, ripple/roll trim, copy/paste, or grid snapping. Clip moves snap their start/end to the playhead within 8 CSS px (Alt bypass); overlap avoidance remains enabled.
 - **Export options** — mp4 only; composition resolution presets (16:9 / 9:16 / 1:1), auto-match on first clip placement, manual match-to-selected-clip; no custom width×height input or frame-rate picker. Clip media is still stretch-fit to transform rects (no letterbox for mixed aspect ratios).
 - **Auth / collaboration / cloud project files** — local single-user MVP.
 

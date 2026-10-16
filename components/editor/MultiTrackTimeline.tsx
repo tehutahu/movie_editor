@@ -1,11 +1,11 @@
 "use client";
 
 import type { EditorStore } from "@/hooks/useEditorStore";
-import { resolveNonOverlappingStart } from "@/lib/editor/clipOps";
+import { resolvePlayheadSnappedStart } from "@/lib/editor/playheadSnap";
 import { formatTimecode, pixelsPerSec, pxToSec, secToPx, filmstripOffsetPercent } from "@/lib/editor/thumbnailMapping";
 import { tracksSortedForTimeline } from "@/lib/editor/project";
 import { timelineTracksAreaHeightPx } from "@/lib/editor/timelineLayout";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const DRAG_THRESHOLD_PX = 4;
 
@@ -143,6 +143,7 @@ type DragState =
       origTrackId: string;
       additive: boolean;
       moved: boolean;
+      pointerId: number;
     }
   | {
       kind: "resize";
@@ -150,6 +151,7 @@ type DragState =
       startX: number;
       origDuration: number;
       moved: boolean;
+      pointerId: number;
     };
 
 type DragPreview = {
@@ -177,8 +179,40 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const trackRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [drag, setDrag] = useState<DragState | null>(null);
-  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+  const [rawDragPreview, setRawDragPreview] = useState<DragPreview | null>(null);
+  const [altPressed, setAltPressed] = useState(false);
   const [scrubbing, setScrubbing] = useState(false);
+  const committedPreviewRef = useRef<DragPreview | null>(null);
+
+  // Retain the unsnapped pointer position. Playback, zoom and stationary Alt
+  // changes rederive the visible position without another pointer move.
+  const movingClip = drag?.kind === "move" ? project.clips.find((c) => c.id === drag.clipId) : undefined;
+  const dragPreview = rawDragPreview && movingClip ? {
+    ...rawDragPreview,
+    startSec: resolvePlayheadSnappedStart({
+      clips: project.clips, clipId: movingClip.id, trackId: rawDragPreview.trackId,
+      rawStartSec: rawDragPreview.startSec, durationSec: movingClip.durationSec,
+      playheadSec: project.playheadSec, pixelsPerSecond: pps, disabled: altPressed,
+    }),
+  } : rawDragPreview;
+
+  useLayoutEffect(() => {
+    committedPreviewRef.current = dragPreview;
+  }, [dragPreview]);
+
+  useEffect(() => {
+    if (!drag) return;
+    const onKey = (event: KeyboardEvent) => setAltPressed(event.altKey);
+    const cancel = () => { committedPreviewRef.current = null; setDrag(null); setRawDragPreview(null); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    window.addEventListener("blur", cancel);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+      window.removeEventListener("blur", cancel);
+    };
+  }, [drag]);
 
   const seekFromClientX = useCallback(
     (clientX: number, areaEl: HTMLElement) => {
@@ -257,13 +291,16 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
   ) {
     e.stopPropagation();
     e.preventDefault();
+    if (e.button !== 0) return;
     const clip = project.clips.find((c) => c.id === clipId);
     if (!clip) return;
+    committedPreviewRef.current = null;
 
     const additive = e.ctrlKey || e.metaKey;
     if (mode === "move") {
       selectClip(clipId, additive);
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      scrollRef.current?.setPointerCapture(e.pointerId);
+      setAltPressed(e.altKey);
       setDrag({
         kind: "move",
         clipId,
@@ -273,24 +310,26 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
         origTrackId: clip.trackId,
         additive,
         moved: false,
+        pointerId: e.pointerId,
       });
     } else {
       if (!project.selectedClipIds.includes(clipId)) {
         selectClip(clipId, false);
       }
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      scrollRef.current?.setPointerCapture(e.pointerId);
       setDrag({
         kind: "resize",
         clipId,
         startX: e.clientX,
         origDuration: clip.durationSec,
         moved: false,
+        pointerId: e.pointerId,
       });
     }
   }
 
   function onPointerMove(e: React.PointerEvent) {
-    if (!drag) return;
+    if (!drag || e.pointerId !== drag.pointerId) return;
     const dx = e.clientX - drag.startX;
 
     if (drag.kind === "move") {
@@ -298,22 +337,19 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
       if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
       const dSec = pxToSec(dx, pps);
       const trackId = trackIdFromClientY(e.clientY) ?? drag.origTrackId;
-      const clip = project.clips.find((c) => c.id === drag.clipId);
       const rawStart = Math.max(0, drag.origStart + dSec);
-      const startSec = clip
-        ? resolveNonOverlappingStart(project.clips, drag.clipId, trackId, rawStart, clip.durationSec)
-        : rawStart;
+      setAltPressed(e.altKey);
       setDrag({ ...drag, moved: true });
-      setDragPreview({
+      setRawDragPreview({
         clipId: drag.clipId,
-        startSec,
+        startSec: rawStart,
         trackId,
       });
     } else {
       if (!drag.moved && Math.abs(dx) < DRAG_THRESHOLD_PX) return;
       const dSec = pxToSec(dx, pps);
       setDrag({ ...drag, moved: true });
-      setDragPreview({
+      setRawDragPreview({
         clipId: drag.clipId,
         startSec: project.clips.find((c) => c.id === drag.clipId)?.timelineStartSec ?? 0,
         trackId: project.clips.find((c) => c.id === drag.clipId)?.trackId ?? "",
@@ -323,21 +359,28 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
   }
 
   function onPointerUp(e: React.PointerEvent) {
-    if (!drag) return;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const preview = committedPreviewRef.current;
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
       // ignore
     }
 
-    if (drag.kind === "move" && dragPreview && drag.moved) {
-      moveSelectedClip(dragPreview.clipId, dragPreview.startSec, dragPreview.trackId);
-    } else if (drag.kind === "resize" && dragPreview?.durationSec !== undefined && drag.moved) {
-      resizeClipDuration(drag.clipId, dragPreview.durationSec);
+    if (drag.kind === "move" && preview && drag.moved) {
+      const clip = project.clips.find((c) => c.id === preview.clipId);
+      // Commit the rendered preview, including during playback. A drag that
+      // returns to its original position must preserve both Undo and Redo.
+      if (clip && (clip.timelineStartSec !== preview.startSec || clip.trackId !== preview.trackId)) {
+        moveSelectedClip(preview.clipId, preview.startSec, preview.trackId);
+      }
+    } else if (drag.kind === "resize" && preview?.durationSec !== undefined && drag.moved) {
+      resizeClipDuration(drag.clipId, preview.durationSec);
     }
 
     setDrag(null);
-    setDragPreview(null);
+    setRawDragPreview(null);
+    committedPreviewRef.current = null;
   }
 
   function clipDisplayState(clipId: string, clip: { timelineStartSec: number; trackId: string; durationSec: number }) {
@@ -365,9 +408,10 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
         ref={scrollRef}
         style={{ height: timelineBodyHeightPx }}
         onPointerDown={onScrubPointerDown}
-        onPointerMove={onScrubPointerMove}
-        onPointerUp={onScrubPointerUp}
-        onPointerCancel={onScrubPointerUp}
+        onPointerMove={(e) => { onPointerMove(e); onScrubPointerMove(e); }}
+        onPointerUp={(e) => { onPointerUp(e); onScrubPointerUp(e); }}
+        onPointerCancel={(e) => { committedPreviewRef.current = null; setDrag(null); setRawDragPreview(null); onScrubPointerUp(e); }}
+        onLostPointerCapture={() => { committedPreviewRef.current = null; setDrag(null); setRawDragPreview(null); }}
       >
         <div
           className="timeline-ruler"
@@ -427,9 +471,6 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
                       backgroundPosition: asset?.thumbnailStripUrl ? `${offset}% 0` : undefined,
                     }}
                     onPointerDown={(e) => onPointerDownClip(e, clip.id, "move")}
-                    onPointerMove={onPointerMove}
-                    onPointerUp={onPointerUp}
-                    onPointerCancel={onPointerUp}
                   >
                     <span className="timeline-clip-label">{asset?.displayName ?? "clip"}</span>
                     <div
