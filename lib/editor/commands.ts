@@ -28,6 +28,8 @@ export type EditorCommand =
       jobId: string;
       speedFactor: number;
       restoredDurationSec: number;
+      restoredWidth: number;
+      restoredHeight: number;
     };
 
 export function applyCommand(
@@ -60,6 +62,8 @@ export function applyCommand(
         jobId: command.jobId,
         speedFactor: command.speedFactor,
         restoredDurationSec: command.restoredDurationSec,
+        restoredWidth: command.restoredWidth,
+        restoredHeight: command.restoredHeight,
       });
     default:
       return null;
