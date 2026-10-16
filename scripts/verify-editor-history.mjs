@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import console from 'node:console';
 import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
+import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
 const suite = verification('history', 3100);
 const { evidence, baseURL, ff, verifyExport } = suite;
 let page;
@@ -90,7 +91,7 @@ let page;
 
     check('export preserves source aspect ratio', payload.compositionWidth / payload.compositionHeight === 320 / 240);
     await seek(1);
-    await page.screenshot({ path: evidence + '/after.png', fullPage: true });
+    await captureEvidenceScreenshot(page, evidence + '/after.png');
     check('no uncaught browser errors', errors.length === 0);
     fs.writeFileSync(evidence + '/browser-results.json', JSON.stringify({ checks, errors }, null, 2));
     console.log('TOTAL ' + checks.length + ' browser checks passed');

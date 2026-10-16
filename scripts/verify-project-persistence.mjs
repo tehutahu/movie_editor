@@ -7,6 +7,7 @@ import process from "node:process";
 import console from "node:console";
 import { Buffer } from "node:buffer";
 import { verification } from "./browser-test-utils.mjs";
+import { captureEvidenceScreenshot } from "./browser-screenshot.mjs";
 const suite = verification("persistence", 3101);
 const { evidence, root, baseURL, ff, start, stop, verifyExport } = suite;
 let browser, page;
@@ -37,6 +38,19 @@ async function waitIdle(page) {
   );
   const errors = await page.locator(".error-banner").allTextContents();
   assert.deepEqual(errors, []);
+}
+async function finishEditing(page) {
+  // Empty assets are rendered before release finishes and triggers a reload.
+  // Arm the load listener before clicking and await the replacement document.
+  await Promise.all([
+    page.waitForEvent("load", { timeout: 30000 }),
+    page.getByRole("button", { name: "編集終了・素材解放", exact: true }).click(),
+  ]);
+  await page.locator(".timeline-track-row").first().waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () => document.querySelectorAll(".asset-card").length === 0,
+  );
+  await waitIdle(page);
 }
 (async () => {
   ff(["-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "2", "-c:v", "libx264", "-c:a", "aac", evidence + "/source.mp4"]);
@@ -154,12 +168,7 @@ async function waitIdle(page) {
   ok(
     "Selection/playhead remain clean; name change is dirty; new save retains old revision",
   );
-  await page
-    .getByRole("button", { name: "編集終了・素材解放", exact: true })
-    .click();
-  await page.waitForFunction(
-    () => document.querySelectorAll(".asset-card").length === 0,
-  );
+  await finishEditing(page);
   await page.waitForLoadState("networkidle");
   const physical = doc1.project.assets[0].media.id;
   assert.ok(fs.existsSync(root + "/jobs/" + physical));
@@ -327,21 +336,13 @@ async function waitIdle(page) {
   await waitIdle(tab2);
   await tab2.waitForSelector(".timeline-clip");
   await json("/api/projects/" + latest.id, null, "DELETE");
-  await page
-    .getByRole("button", { name: "編集終了・素材解放", exact: true })
-    .click();
-  await page.waitForFunction(
-    () => document.querySelectorAll(".asset-card").length === 0,
-  );
+  await finishEditing(page);
   assert.ok(fs.existsSync(root + "/uploads/" + sourceId + "/input.mp4"));
   ok(
     "Other browser tab keeps relinked media protected after version deletion and first-tab release",
   );
-  await page.screenshot({ path: evidence + "/completed.png", fullPage: true });
-  await tab2.screenshot({
-    path: evidence + "/loaded-relinked.png",
-    fullPage: true,
-  });
+  await captureEvidenceScreenshot(page, evidence + "/completed.png");
+  await captureEvidenceScreenshot(tab2, evidence + "/loaded-relinked.png");
   // Images must not require a video duration. Exercise an uncertain save that
   // another tab deletes before the original tab retries it.
   const images = await context.newPage();
@@ -424,12 +425,7 @@ async function waitIdle(page) {
   const imageTimeline = (
     await json("/api/projects", null, "GET")
   ).data.projects.at(-1);
-  await images
-    .getByRole("button", { name: "編集終了・素材解放", exact: true })
-    .click();
-  await images.waitForFunction(
-    () => document.querySelectorAll(".asset-card").length === 0,
-  );
+  await finishEditing(images);
   await images.waitForLoadState("networkidle");
   await stop();
   await start();
@@ -452,10 +448,7 @@ async function waitIdle(page) {
     (await json(`/api/projects/${imageTimeline.id}`, null, "GET")).status,
     200,
   );
-  await images.screenshot({
-    path: `${evidence}/loaded-images.png`,
-    fullPage: true,
-  });
+  await captureEvidenceScreenshot(images, `${evidence}/loaded-images.png`);
   ok(
     "Real PNG/JPEG library and image clip survive save, tab release, server restart, reload and ffmpeg export",
   );
