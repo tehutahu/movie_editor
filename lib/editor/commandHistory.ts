@@ -14,6 +14,20 @@ export function getCurrentProject(history: CommandHistory): EditorProject {
   return history.undoStack[history.undoStack.length - 1]!;
 }
 
+/** Update navigation state without adding an edit or invalidating Redo. */
+export function updateEditorView(
+  history: CommandHistory,
+  view: Partial<Pick<EditorProject, "playheadSec" | "selectedClipIds">>,
+): CommandHistory {
+  return {
+    ...history,
+    undoStack: [
+      ...history.undoStack.slice(0, -1),
+      { ...getCurrentProject(history), ...view },
+    ],
+  };
+}
+
 export function dispatchCommand(
   history: CommandHistory,
   command: EditorCommand,

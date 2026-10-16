@@ -20,6 +20,7 @@ import {
   getCurrentProject,
   redo,
   undo,
+  updateEditorView,
   type CommandHistory,
 } from "@/lib/editor/commandHistory";
 import type { EditorCommand } from "@/lib/editor/commands";
@@ -160,14 +161,7 @@ export function useEditorStore() {
       const raw = typeof sec === "function" ? sec(cur.playheadSec) : sec;
       const clamped = Math.max(0, Math.min(raw, cur.compositionDurationSec));
       if (Math.abs(clamped - cur.playheadSec) < 1e-6) return h;
-      return {
-        ...h,
-        undoStack: [
-          ...h.undoStack.slice(0, -1),
-          { ...cur, playheadSec: clamped },
-        ],
-        redoStack: [],
-      };
+      return updateEditorView(h, { playheadSec: clamped });
     });
   }, []);
 
@@ -196,11 +190,7 @@ export function useEditorStore() {
       } else {
         selected = [clipId];
       }
-      return {
-        ...h,
-        undoStack: [...h.undoStack.slice(0, -1), { ...cur, selectedClipIds: selected }],
-        redoStack: [],
-      };
+      return updateEditorView(h, { selectedClipIds: selected });
     });
   }, []);
 
@@ -208,11 +198,7 @@ export function useEditorStore() {
     setHistory((h) => {
       const cur = getCurrentProject(h);
       if (cur.selectedClipIds.length === 0) return h;
-      return {
-        ...h,
-        undoStack: [...h.undoStack.slice(0, -1), { ...cur, selectedClipIds: [] }],
-        redoStack: [],
-      };
+      return updateEditorView(h, { selectedClipIds: [] });
     });
   }, []);
 
