@@ -71,6 +71,16 @@ export function resolveNonOverlappingStart(
     if (!adjusted) break;
   }
 
+  // The nearest-edge passes can oscillate between tightly packed neighbors.
+  // Repair only a remaining overlap with a monotonic rightward sweep. Sorted
+  // neighbors already cleared cannot be hit again, so the result is a fixed
+  // point for subsequent resolutions as well as a nonoverlapping placement.
+  for (const other of others) {
+    if (clipsOverlap(start, durationSec, other.timelineStartSec, other.durationSec)) {
+      start = clipEndSec(other);
+    }
+  }
+
   return Math.max(0, start);
 }
 
