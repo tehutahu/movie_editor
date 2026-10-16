@@ -16,6 +16,7 @@ import {
 } from "@/lib/editor/compositor";
 import type { ActiveClipLayer, TransformHandle } from "@/lib/editor/compositor";
 import type { ClipTransform } from "@/lib/editor/types";
+import { createPreviewFrames } from "@/lib/editor/previewFrames";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const EDITOR_HELP_ITEMS = [
@@ -166,7 +167,8 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const isPlayingRef = useRef(false);
   isPlayingRef.current = isPlaying;
-  const drawRafRef = useRef<number | null>(null);
+  const framesRef = useRef<ReturnType<typeof createPreviewFrames> | null>(null);
+  const mediaListenersRef = useRef<Map<HTMLVideoElement | HTMLImageElement, () => void>>(new Map());
   const playRafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
 
@@ -295,6 +297,8 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   const transformPreviewRef = useRef(transformPreview);
   transformPreviewRef.current = transformPreview;
 
+  const requestDraw = useCallback(() => framesRef.current?.invalidate(), []);
+
   const ensureMedia = useCallback(
     (layer: ActiveClipLayer): HTMLVideoElement | HTMLImageElement => {
       const key = mediaPoolKey(layer);
@@ -310,19 +314,21 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
           el.muted = true;
           el.playsInline = true;
           el.preload = "auto";
-          el.addEventListener("seeked", () => {
-            void drawRef.current?.();
-          });
         }
-        el.src = layer.asset.streamUrl;
-        el.addEventListener("loadeddata", () => {
-          void drawRef.current?.();
+        // Images emit load (not loadeddata), including when already cached.
+        // Register before src so readiness cannot race listener installation.
+        const events = el instanceof HTMLVideoElement ? ["loadeddata", "seeked"] : ["load"];
+        for (const event of events) el.addEventListener(event, requestDraw);
+        const media = el;
+        mediaListenersRef.current.set(media, () => {
+          for (const event of events) media.removeEventListener(event, requestDraw);
         });
         pool.set(key, el);
+        el.src = layer.asset.streamUrl;
       }
       return el;
     },
-    [],
+    [requestDraw],
   );
 
   const drawRef = useRef<(() => void) | null>(null);
@@ -359,7 +365,39 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     return media.complete && media.naturalWidth > 0;
   }, []);
 
+  // Media state must be synchronized even when the canvas is hidden, size zero,
+  // has no context, or is waiting for the next decoded frame.
+  const syncPooledMedia = useCallback(() => {
+    const proj = projectRef.current;
+    const layers = resolveActiveClipsAtPlayhead(proj, proj.playheadSec);
+    const activeKeys = new Set(layers.map(mediaPoolKey));
+    const playing = isPlayingRef.current;
+    for (const layer of layers) {
+      const media = ensureMedia(layer);
+      if (media instanceof HTMLVideoElement) syncVideoTime(media, layer.sourceTimeSec, playing);
+    }
+    for (const [key, media] of mediaPoolRef.current) {
+      if (media instanceof HTMLVideoElement && (!playing || !activeKeys.has(key)) && !media.paused) media.pause();
+    }
+    return layers;
+  }, [ensureMedia, syncVideoTime]);
+
+  const syncAudio = useCallback(() => {
+    const proj = projectRef.current;
+    const audio = resolveAudioClipAtPlayhead(proj, proj.playheadSec);
+    const video = audioVideoRef.current;
+    if (!video) return;
+    if (!audio) {
+      video.pause();
+      return;
+    }
+    const absUrl = new URL(audio.asset.streamUrl, window.location.origin).href;
+    if (video.src !== absUrl) video.src = audio.asset.streamUrl;
+    syncVideoTime(video, audio.sourceTimeSec, isPlayingRef.current);
+  }, [audioVideoRef, syncVideoTime]);
+
   const draw = useCallback(() => {
+    const layers = syncPooledMedia();
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
@@ -395,17 +433,6 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
     const preview = transformPreviewRef.current;
 
-    const layers = resolveActiveClipsAtPlayhead(proj, proj.playheadSec);
-    const activeKeys = new Set<string>();
-    const playing = isPlayingRef.current;
-
-    for (const layer of layers) {
-      const media = ensureMedia(layer);
-      if (media instanceof HTMLVideoElement) {
-        syncVideoTime(media, layer.sourceTimeSec, playing);
-      }
-    }
-
     const drawableLayers = layers.filter((layer) => canDrawMedia(ensureMedia(layer)));
     if (layers.length > 0 && drawableLayers.length === 0) {
       return;
@@ -416,8 +443,6 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
     for (const layer of layers) {
       const media = ensureMedia(layer);
-      const key = mediaPoolKey(layer);
-      activeKeys.add(key);
       const transform = layerTransform(layer, preview);
       const { x, y, scale } = transform;
       const drawW = w * BASE_DRAW_WIDTH_RATIO * scale;
@@ -439,24 +464,57 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
       }
     }
 
-    for (const [key, media] of mediaPoolRef.current) {
-      if (activeKeys.has(key) || !(media instanceof HTMLVideoElement)) continue;
-      if (!media.paused) media.pause();
-    }
-  }, [canDrawMedia, ensureMedia, syncVideoTime]);
+  }, [canDrawMedia, ensureMedia, syncPooledMedia]);
 
   drawRef.current = draw;
 
   useEffect(() => {
-    const loop = () => {
-      draw();
-      drawRafRef.current = requestAnimationFrame(loop);
-    };
-    drawRafRef.current = requestAnimationFrame(loop);
+    const frames = createPreviewFrames({
+      draw: () => drawRef.current?.(),
+      request: requestAnimationFrame,
+      cancel: cancelAnimationFrame,
+    });
+    framesRef.current = frames;
+    const container = containerRef.current;
+    const audio = audioVideoRef.current;
+    const pool = mediaPoolRef.current;
+    const listeners = mediaListenersRef.current;
+    const observer = new ResizeObserver(requestDraw);
+    if (container) observer.observe(container);
+    window.addEventListener("resize", requestDraw);
+    document.addEventListener("fullscreenchange", requestDraw);
+    document.addEventListener("visibilitychange", requestDraw);
+    audio?.addEventListener("loadeddata", syncAudio);
+    audio?.addEventListener("seeked", syncAudio);
+    frames.invalidate();
     return () => {
-      if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
+      frames.dispose();
+      framesRef.current = null;
+      observer.disconnect();
+      window.removeEventListener("resize", requestDraw);
+      document.removeEventListener("fullscreenchange", requestDraw);
+      document.removeEventListener("visibilitychange", requestDraw);
+      audio?.removeEventListener("loadeddata", syncAudio);
+      audio?.removeEventListener("seeked", syncAudio);
+      for (const remove of listeners.values()) remove();
+      listeners.clear();
+      for (const media of pool.values()) {
+        if (media instanceof HTMLVideoElement) {
+          media.pause();
+          media.removeAttribute("src");
+          media.load();
+        }
+      }
+      pool.clear();
+      audio?.pause();
     };
-  }, [draw]);
+  }, [audioVideoRef, requestDraw, syncAudio]);
+
+  useEffect(() => {
+    syncPooledMedia();
+    framesRef.current?.setPlaying(isPlaying);
+    requestDraw();
+  }, [project, transformPreview, isPlaying, requestDraw, syncPooledMedia]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -491,13 +549,8 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   }, [isPlaying]);
 
   useEffect(() => {
-    const audio = resolveAudioClipAtPlayhead(project, project.playheadSec);
-    const vid = audioVideoRef.current;
-    if (!vid || !audio) return;
-    const absUrl = new URL(audio.asset.streamUrl, window.location.origin).href;
-    if (vid.src !== absUrl) vid.src = audio.asset.streamUrl;
-    syncVideoTime(vid, audio.sourceTimeSec, isPlaying);
-  }, [project, project.playheadSec, audioVideoRef, isPlaying, syncVideoTime]);
+    syncAudio();
+  }, [project, isPlaying, syncAudio]);
 
   useEffect(() => {
     for (const asset of project.assets) {
