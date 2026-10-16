@@ -17,6 +17,7 @@ import {
 import { assertStorageId, parseAllowedAssetExtension } from "@/lib/validation";
 import { persistCompletedJobForProject } from "@/lib/jobs";
 import { probeImage, probeVideo } from "@/lib/ffmpeg";
+import { matchesMediaDimensions } from "@/lib/videoDimensions";
 
 function requireLocal() {
   if (
@@ -91,8 +92,7 @@ async function validateMedia(doc: ProjectDocument, saving: boolean) {
         : await probeVideo(input!);
     if (
       !meta.hasVideo ||
-      (asset.width !== undefined && asset.width !== meta.width) ||
-      (asset.height !== undefined && asset.height !== meta.height) ||
+      !matchesMediaDimensions(asset, meta) ||
       (asset.kind === "video" &&
         Math.abs(asset.sourceDurationSec! - meta.durationSec) > 1 / 30)
     ) {

@@ -1,10 +1,14 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { videoDisplayDimensions, type VideoDisplayStream } from "@/lib/videoDimensions";
 
 export type ProbeInfo = {
   durationSec: number;
   width?: number;
   height?: number;
+  /** Display size for new editor assets; width/height above remain encoded. */
+  displayWidth?: number;
+  displayHeight?: number;
   hasAudio: boolean;
   hasVideo: boolean;
 };
@@ -171,11 +175,7 @@ export async function assertFfmpegAvailable(): Promise<{
 
 type FfProbeJson = {
   format?: { duration?: string; format_name?: string };
-  streams?: {
-    codec_type?: string;
-    width?: number;
-    height?: number;
-  }[];
+  streams?: (VideoDisplayStream & { codec_type?: string })[];
 };
 
 async function probeMedia(inputPath: string): Promise<FfProbeJson> {
@@ -233,12 +233,16 @@ export async function probeVideo(inputPath: string): Promise<ProbeInfo> {
   const streams = json.streams ?? [];
   const hasAudio = streams.some((s) => s.codec_type === "audio");
   const videoStream = streams.find((s) => s.codec_type === "video");
+  const width = typeof videoStream?.width === "number" ? videoStream.width : undefined;
+  const height = typeof videoStream?.height === "number" ? videoStream.height : undefined;
+  const display = videoDisplayDimensions({ ...videoStream, width, height });
 
   return {
     durationSec: durationRaw,
-    width: typeof videoStream?.width === "number" ? videoStream.width : undefined,
-    height:
-      typeof videoStream?.height === "number" ? videoStream.height : undefined,
+    width,
+    height,
+    displayWidth: display.width,
+    displayHeight: display.height,
     hasAudio,
     hasVideo: Boolean(videoStream),
   };

@@ -126,8 +126,8 @@ export async function POST(req: Request) {
       if (inputPath && parsed.kind === "video") {
         const probe = await probeVideo(inputPath);
         sourceDurationSec = probe.durationSec;
-        width = probe.width;
-        height = probe.height;
+        width = probe.displayWidth ?? probe.width;
+        height = probe.displayHeight ?? probe.height;
         thumbnailJobId = await runThumbnailJob(assetId, inputPath, probe.durationSec);
       } else if (inputPath && parsed.kind === "image") {
         const probe = await probeImage(inputPath);
