@@ -42,3 +42,6 @@ yarn-error.log*
 
 # smoke test (generated locally)
 _smoke.mp4
+
+# browser regression artifacts
+/test-results/

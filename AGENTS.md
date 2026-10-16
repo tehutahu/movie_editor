@@ -31,7 +31,6 @@ Do not assume these exist when testing or extending the app:
 - **Advanced editing** — no transitions, effects, text overlays, opacity, volume per clip, ripple/roll trim, copy/paste, or playhead/grid snapping (overlap snap on move only).
 - **Export options** — mp4 only; composition resolution presets (16:9 / 9:16 / 1:1), auto-match on first clip placement, manual match-to-selected-clip; no custom width×height input or frame-rate picker. Clip media is still stretch-fit to transform rects (no letterbox for mixed aspect ratios).
 - **Auth / collaboration / cloud project files** — local single-user MVP.
-- **CI browser E2E** — Vitest unit tests only; ffmpeg not installed in CI.
 
 ## Codebase map
 
@@ -75,7 +74,7 @@ app/api/videos/*          → legacy upload/stream (compat)
 ### Required external dependencies
 
 - **Node.js**: `engines.node` in `package.json` is `22.14.0` (`.nvmrc` matches). Minor Node 22.x versions usually work; run `nvm use` for an exact match.
-- **ffmpeg / ffprobe**: Required for real media processing (upload metadata, speed restore, export, merge). Resolution order: `FFMPEG_PATH` / `FFPROBE_PATH` env vars → `ffmpeg-static` / `ffprobe-static` npm packages → system PATH. CI (`.github/workflows/ci.yml`) does not install ffmpeg; Vitest mocks API routes. **Browser E2E and real file processing require ffmpeg.**
+- **ffmpeg / ffprobe**: Required for real media processing (upload metadata, speed restore, export, merge). Resolution order: `FFMPEG_PATH` / `FFPROBE_PATH` env vars → `ffmpeg-static` / `ffprobe-static` npm packages → system PATH. CI (`.github/workflows/ci.yml`) installs ffmpeg and Chromium and enables all real-media regressions. **Browser E2E and real file processing require ffmpeg.**
 
 ### Service layout
 
@@ -107,8 +106,10 @@ No Docker, DB, Redis, or separate worker. Data lives under `storage/uploads/` an
 
 #### Automated (CI-equivalent)
 
+CI installs ffmpeg and Playwright Chromium. Install the same dependencies locally before running the full checks below.
+
 ```bash
-npm run lint && npm test && npm run build
+npm run lint && RUN_FFMPEG_TESTS=1 npm test && npm run build && npm run test:typecheck && npm run test:browser
 ```
 
 #### API smoke test
