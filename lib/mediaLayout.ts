@@ -83,6 +83,7 @@ export async function assertStillImageLayout(file: string, ext: string): Promise
         if (pos + 8 + len > size) orientationError();
         if (kind === "EXIF") tiff(await read(pos + 8, len));
         if (kind === "ANIM" || kind === "ANMF") fail("UNSUPPORTED_LAYOUT_ANIMATION");
+        if (kind === "VP8X" && (len !== 10 || ((await read(pos + 8, len))[0]! & 2))) fail("UNSUPPORTED_LAYOUT_ANIMATION");
         pos += 8 + len + (len % 2);
       }
       if (pos !== size) orientationError();
@@ -91,7 +92,7 @@ export async function assertStillImageLayout(file: string, ext: string): Promise
 }
 
 export async function inspectMediaLayout(input: string, kind: "image" | "video", ext: string) {
-  const raw = await probeMedia(input);
+  const raw = await probeMedia(input).catch(() => fail("LAYOUT_MEDIA_UNREADABLE"));
   const formats = raw.format?.format_name?.split(",") ?? [];
   const imageFormats = new Set(["png_pipe", "jpeg_pipe", "webp_pipe", "gif", "apng", "image2", "image2pipe"]);
   const actualImage = formats.some(f => imageFormats.has(f));
@@ -114,6 +115,9 @@ export async function inspectMediaLayout(input: string, kind: "image" | "video",
     const [a,b,c] = rows as number[][];
     if (a![2] !== 0 || b![2] !== 0 || c![0] !== 0 || c![1] !== 0 || c![2] !== 1073741824 ||
         a![0]! * b![1]! - a![1]! * b![0]! !== 65536 ** 2 ||
+        a![0]! ** 2 + a![1]! ** 2 !== 65536 ** 2 ||
+        b![0]! ** 2 + b![1]! ** 2 !== 65536 ** 2 ||
+        a![0]! * b![0]! + a![1]! * b![1]! !== 0 ||
         ![a![0],a![1],b![0],b![1]].every(n => n === 0 || Math.abs(n!) === 65536)) fail("UNSUPPORTED_LAYOUT_ROTATION");
     rotations.push(((d.rotation % 360) + 360) % 360);
   }
@@ -127,7 +131,7 @@ export async function inspectMediaLayout(input: string, kind: "image" | "video",
   if (new Set(rotations).size > 1) fail("UNSUPPORTED_LAYOUT_ROTATION");
   const display = videoDisplayDimensions(v);
   const origin = kind === "video" ? Number(v.start_time) : 0;
-  if (!Number.isFinite(origin)) fail("UNSUPPORTED_LAYOUT_TIMING");
+  if (!Number.isFinite(origin) || (kind === "video" && (typeof v.start_time !== "string" || !v.start_time.trim()))) fail("UNSUPPORTED_LAYOUT_TIMING");
   return { width: display.width!, height: display.height!, origin,
     hasAudio: raw.streams?.some(s => s.codec_type === "audio") ?? false,
     durationSec: Number(raw.format?.duration) };

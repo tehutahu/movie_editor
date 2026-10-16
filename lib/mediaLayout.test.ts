@@ -16,7 +16,7 @@ it("accepts exact quarter turn matrix and rejects reflection/shear/ambiguous ang
  const d={side_data_type:"Display Matrix",rotation:-90,displaymatrix:"00000000: 0 -65536 0\n00000001: 65536 0 0\n00000002: 0 0 1073741824"};
  probe.mockResolvedValue(video({sample_aspect_ratio:"1:1",side_data_list:[d]}));
  expect(await inspectMediaLayout("/x","video","mp4")).toMatchObject({width:240,height:320,origin:0});
- for(const bad of [{...d,rotation:45},{...d,displaymatrix:d.displaymatrix.replace("65536 0 0","-65536 0 0")},{...d,displaymatrix:undefined}]){
+ for(const bad of [{...d,rotation:45},{...d,displaymatrix:d.displaymatrix.replace("65536 0 0","-65536 0 0")},{...d,displaymatrix:undefined},{...d,rotation:0,displaymatrix:"00000000: 65536 65536 0\n00000001: 0 65536 0\n00000002: 0 0 1073741824"}]){
   probe.mockResolvedValue(video({side_data_list:[bad]}));await expect(inspectMediaLayout("/x","video","mp4")).rejects.toMatchObject({code:"UNSUPPORTED_LAYOUT_ROTATION"});
  }
  probe.mockResolvedValue(video({start_time:undefined}));await expect(inspectMediaLayout("/x","video","mp4")).rejects.toMatchObject({code:"UNSUPPORTED_LAYOUT_TIMING"});
@@ -46,4 +46,9 @@ it("checks physical format before trusting client kind/ext, including disguised 
  await expect(inspectMediaLayout("/ignored","video","mp4")).rejects.toMatchObject({code:"UNSUPPORTED_LAYOUT_MEDIA_KIND"});
  probe.mockResolvedValue(video());
  await expect(inspectMediaLayout("/ignored","image","png")).rejects.toMatchObject({code:"UNSUPPORTED_LAYOUT_MEDIA_KIND"});
+});
+
+it("rejects WebP animation feature flags even if ANIM payload is absent",async()=>{
+ const file=path.join(dir,"flag.webp"),b=Buffer.alloc(30);b.write("RIFF");b.writeUInt32LE(22,4);b.write("WEBPVP8X",8);b.writeUInt32LE(10,16);b[20]=2;await writeFile(file,b);
+ await expect(assertStillImageLayout(file,"webp")).rejects.toMatchObject({code:"UNSUPPORTED_LAYOUT_ANIMATION"});
 });
