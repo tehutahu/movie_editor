@@ -1,5 +1,6 @@
 import { computeCompositionDuration } from "@/lib/editor/project";
 import type { EditorProject } from "@/lib/editor/types";
+import { assertRestoreResult, type RestoreResult } from "./restoreResult";
 
 /** 速度復元ジョブ完了後、素材ストリーム・クリップ長・ソース区間を更新します。 */
 export function applySpeedRestoreToProject(
@@ -8,10 +9,10 @@ export function applySpeedRestoreToProject(
     assetId: string;
     jobId: string;
     speedFactor: number;
-    restoredDurationSec: number;
-  },
+  } & RestoreResult,
 ): EditorProject {
-  const { assetId, jobId, speedFactor, restoredDurationSec } = params;
+  const { assetId, jobId, speedFactor, restoredDurationSec, restoredWidth, restoredHeight } = params;
+  assertRestoreResult(params);
   if (!(speedFactor > 0) || !Number.isFinite(speedFactor)) {
     throw new Error("速度係数が不正です。");
   }
@@ -25,6 +26,8 @@ export function applySpeedRestoreToProject(
   asset.streamUrl = `/api/jobs/${jobId}/stream`;
   asset.sourceJobId = jobId;
   asset.sourceDurationSec = restoredDurationSec;
+  asset.width = restoredWidth;
+  asset.height = restoredHeight;
 
   for (const clip of next.clips) {
     let usesAsset = false;

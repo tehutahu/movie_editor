@@ -40,6 +40,7 @@ import type { AppliedJobStep, Asset, ClipTransform, EditorProject } from "@/lib/
 import { storageReferences } from "@/lib/editor/storageReferences";
 import { useProjectPersistence } from "@/hooks/useProjectPersistence";
 import { selectedClipExportRequest } from "@/lib/editor/selectedClipExport";
+import { matchesRestoreSource, parseRestoreResultMetadata, restoreSource } from "@/lib/editor/restoreResult";
 
 type JobPollInfo = {
   jobId: string;
@@ -84,6 +85,9 @@ export function useEditorStore() {
   const [liveJob, setLiveJob] = useState<JobPollInfo | null>(null);
   const [jobPhase, setJobPhase] = useState<string | null>(null);
   const [appliedJobSteps, setAppliedJobSteps] = useState<AppliedJobStep[]>([]);
+  const [pendingRestores, setPendingRestores] = useState<{
+    clientId: string; epoch: number; assetId: string; jobId: string; clipId: string;
+  }[]>([]);
   const [speedFactor, setSpeedFactor] = useState("2");
   const [sampleRateHz, setSampleRateHz] = useState("44100");
   const [timelineZoom, setTimelineZoom] = useState(1);
@@ -107,9 +111,39 @@ export function useEditorStore() {
 
   const project = useMemo(() => getCurrentProject(history), [history]);
   const [projectEpoch, setProjectEpoch] = useState(0);
+  const projectEpochRef = useRef(0);
+  const latestProjectRef = useRef(project);
+  latestProjectRef.current = project;
   const persistence = useProjectPersistence({ history, setHistory, sessionId, busy, setBusy, setError,
-    onLoaded: () => { audioVideoRef.current?.pause(); setAppliedJobSteps([]); setLiveJob(null); setJobPhase(null); setProjectEpoch(v => v + 1); },
+    onLoaded: () => { projectEpochRef.current += 1; audioVideoRef.current?.pause(); setPendingRestores([]); setAppliedJobSteps([]); setLiveJob(null); setJobPhase(null); setProjectEpoch(v => v + 1); },
   });
+  // Record success only after the history commit adopted this exact result.
+  // Updaters stay pure, and a stale result never creates a completed step.
+  useEffect(() => {
+    if (pendingRestores.length === 0) return;
+    const adopted = pendingRestores.filter((pending) =>
+      pending.epoch === projectEpochRef.current && project.assets.some((asset) =>
+        asset.id === pending.assetId && asset.sourceJobId === pending.jobId &&
+        asset.streamUrl === `/api/jobs/${pending.jobId}/stream`));
+    if (adopted.length) {
+      setAppliedJobSteps((previous) => {
+        const seen = new Set(previous.map((step) => step.jobId));
+        const next = [...previous];
+        for (const pending of adopted) {
+          if (seen.has(pending.jobId)) continue;
+          seen.add(pending.jobId);
+          next.push({ clientId: pending.clientId, kind: "restore", jobId: pending.jobId,
+            clipId: pending.clipId, status: "done" });
+        }
+        return next.length === previous.length ? previous : next;
+      });
+    }
+    if (adopted.length !== pendingRestores.length) {
+      setError("速度復元の対象が変更されたため、結果を適用しませんでした。");
+    }
+    const completed = new Set(pendingRestores.map((pending) => pending.clientId));
+    setPendingRestores((current) => current.filter((pending) => !completed.has(pending.clientId)));
+  }, [pendingRestores, project]);
   const finishRef = useRef(false);
   const finishEditing = useCallback(async () => {
     if (finishRef.current || busy || persistence.locked) return;
@@ -510,6 +544,11 @@ export function useEditorStore() {
       return;
     }
 
+    const source = restoreSource(asset);
+    const epoch = projectEpochRef.current;
+    const sourceStillCurrent = (p: EditorProject) =>
+      projectEpochRef.current === epoch && matchesRestoreSource(p, source);
+
     setBusy("速度復元中…");
     setJobPhase("restore:queued");
     try {
@@ -528,7 +567,7 @@ export function useEditorStore() {
       });
       const json = (await res.json()) as { jobId?: string; error?: string };
       if (!res.ok) throw new Error(json.error ?? "ジョブ作成失敗");
-      if (!json.jobId) throw new Error("jobId がありません。");
+      if (typeof json.jobId !== "string" || !json.jobId) throw new Error("jobId がありません。");
 
       const info = await pollJobUntil(json.jobId, {
         onTick: (j) => {
@@ -537,28 +576,35 @@ export function useEditorStore() {
         },
       });
       if (info.status === "error") throw new Error(info.error ?? "復元失敗");
+      if (info.status !== "done" || info.jobId !== json.jobId || info.kind !== "restore") {
+        throw new Error("速度復元ジョブの結果が一致しません。");
+      }
 
       const metaRes = await fetch(`/api/jobs/${json.jobId}/metadata`, { cache: "no-store" });
-      const metaJson = (await metaRes.json()) as { durationSec?: number; error?: string };
-      if (!metaRes.ok || typeof metaJson.durationSec !== "number") {
-        throw new Error(metaJson.error ?? "復元後のメタデータ取得に失敗しました。");
+      const metaJson: unknown = await metaRes.json();
+      if (!metaRes.ok) {
+        const message = metaJson && typeof metaJson === "object" && "error" in metaJson ? metaJson.error : null;
+        throw new Error(typeof message === "string" ? message : "復元後のメタデータ取得に失敗しました。");
+      }
+      const restored = parseRestoreResultMetadata(metaJson, json.jobId);
+      if (!sourceStillCurrent(latestProjectRef.current)) {
+        throw new Error("速度復元の対象が変更されたため、結果を適用しませんでした。");
       }
 
       setHistory((h) => {
+        if (!sourceStillCurrent(getCurrentProject(h))) return h;
         const result = dispatchCommand(h, {
           type: "restoreSpeed",
           assetId: asset.id,
           jobId: json.jobId!,
           speedFactor: factor,
-          restoredDurationSec: metaJson.durationSec!,
+          ...restored,
         });
         return result?.history ?? h;
       });
 
-      setAppliedJobSteps((prev) => [
-        ...prev,
-        { clientId: crypto.randomUUID(), kind: "restore", jobId: json.jobId!, clipId, status: "done" },
-      ]);
+      const pending = { clientId: crypto.randomUUID(), epoch, assetId: asset.id, jobId: json.jobId, clipId };
+      setPendingRestores((previous) => [...previous, pending]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
