@@ -1,3 +1,5 @@
+import { validateContainMedia } from "@/lib/exportLayoutComposition";
+import { MediaLayoutError } from "@/lib/mediaLayout";
 import { StorageRetentionError } from "@/lib/storageRetention";
 import { NextResponse } from "next/server";
 import { buildDownloadFilename, sanitizeExportBaseName } from "@/lib/exportName";
@@ -21,6 +23,7 @@ export async function POST(req: Request) {
     }
 
     const parsed = parseCompositionExportPayload(body);
+    await validateContainMedia(parsed.project);
     const baseName = sanitizeExportBaseName(parsed.exportBaseName ?? "project");
     const sessionId = (body as { editorSessionId?: string }).editorSessionId;
     const job = await createRetainedJobRecord("export_composition", {
@@ -45,8 +48,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ jobId: job.id });
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : String(e) },
-      { status: e instanceof StorageRetentionError ? e.status : 400 },
+      { error: e instanceof Error ? e.message : String(e), ...(e instanceof MediaLayoutError ? { code: e.code } : {}) },
+      { status: e instanceof MediaLayoutError ? 422 : e instanceof StorageRetentionError ? e.status : 400 },
     );
   }
 }

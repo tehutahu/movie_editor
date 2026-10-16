@@ -24,7 +24,7 @@ export type MediaReference = {
 };
 export type ProjectDocument = {
   format: "movie-editor-project";
-  version: 1;
+  version: 1 | 2;
   project: Pick<
     EditorProject,
     | "tracks"
@@ -67,7 +67,7 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
   )
     throw new Error("JSON サイズが上限を超えています。");
   const doc = record(raw);
-  if (doc.format !== "movie-editor-project" || doc.version !== 1)
+  if (doc.format !== "movie-editor-project" || (doc.version !== 1 && doc.version !== 2))
     throw new Error("未対応のプロジェクト形式・version です。");
   const p = record(doc.project);
   const duration = assertStrictFiniteNumber(
@@ -142,15 +142,17 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
     new Set(tracks.map((t) => t.order)).size !== tracks.length
   )
     throw new Error("トラック順が不正です。");
-  const clips = array(p.clips, 100).map((c, i) =>
-    parseClip(
+  const clips = array(p.clips, 100).map((c, i) => {
+    if (doc.version === 1 && Object.hasOwn(record(c), "layoutMode"))
+      throw new Error("v1 に配置モードは指定できません。");
+    return parseClip(
       c,
       i,
       new Set(tracks.map((t) => t.id)),
       new Set(assets.map((a) => a.id)),
       duration,
-    ),
-  );
+    );
+  });
   unique(assets.map((a) => a.id));
   unique(tracks.map((t) => t.id));
   unique(clips.map((c) => c.id));
@@ -167,7 +169,7 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
     }
   return {
     format: "movie-editor-project",
-    version: 1,
+    version: doc.version as 1 | 2,
     project: {
       assets,
       tracks,
@@ -183,10 +185,13 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
 export function projectDocumentDraft(project: EditorProject): ProjectDocument {
   return {
     format: "movie-editor-project",
-    version: 1,
+    version: project.clips.some(c => c.layoutMode === "contain") ? 2 : 1,
     project: {
       tracks: structuredClone(project.tracks),
-      clips: structuredClone(project.clips),
+      clips: project.clips.map(c => {
+        const { layoutMode, ...clip } = structuredClone(c);
+        return layoutMode === "contain" ? { ...clip, layoutMode } : clip;
+      }),
       compositionWidth: project.compositionWidth,
       compositionHeight: project.compositionHeight,
       compositionDurationSec: project.compositionDurationSec,

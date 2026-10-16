@@ -67,7 +67,7 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
           type="button"
           onClick={() => void downloadSelectedClip()}
           disabled={Boolean(busy) || Boolean(clipExportBusyId)}
-          title="選択クリップ DL (Shift+Ctrl+E)"
+          title="選択クリップの素材切り出し。位置・拡大率は適用しません。単一動画は原寸、画像・結合クリップは先頭素材の画面内で配置モードを適用します (Shift+Ctrl+E)"
         >
           ⬇
         </button>
@@ -79,6 +79,17 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
         >
           ⛶
         </button>
+        <label title="素材の全体を枠内に収めます。余白は透明です。全体書き出しに配置枠を反映します。">
+          配置
+          <select aria-label="クリップの配置" disabled={Boolean(busy) || editor.layoutChecking || project.selectedClipIds.length === 0}
+            value={(() => { const modes = new Set(project.clips.filter(c => project.selectedClipIds.includes(c.id)).map(c => c.layoutMode ?? "stretch")); return modes.size === 1 ? [...modes][0] : "mixed"; })()}
+            onChange={e => { if (e.target.value !== "mixed") void editor.setSelectedLayoutMode(e.target.value as "stretch" | "contain"); }}>
+            <option value="mixed" disabled>混在 / 未選択</option>
+            <option value="stretch">引き伸ばし（従来）</option>
+            <option value="contain">縦横比を保持（全体を表示）</option>
+          </select>
+          {editor.layoutChecking && <span role="status">素材を確認中…</span>}
+        </label>
       </div>
       <div className="timeline-toolbar-center muted">
         {formatTimecode(project.playheadSec)} / {formatTimecode(project.compositionDurationSec)}

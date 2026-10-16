@@ -36,7 +36,8 @@ import {
   compositionSizeFromAsset,
   fitClipTransformToCanvas,
 } from "@/lib/editor/compositor";
-import type { AppliedJobStep, Asset, ClipTransform, EditorProject } from "@/lib/editor/types";
+import { validateBrowserMediaLayouts } from "@/lib/editor/mediaLayoutClient";
+import type { AppliedJobStep, Asset, ClipLayoutMode, ClipTransform, EditorProject } from "@/lib/editor/types";
 import { storageReferences } from "@/lib/editor/storageReferences";
 import { useProjectPersistence } from "@/hooks/useProjectPersistence";
 import { selectedClipExportRequest } from "@/lib/editor/selectedClipExport";
@@ -79,6 +80,8 @@ export function useEditorStore() {
   const [history, setHistory] = useState<CommandHistory>(() =>
     createCommandHistory(createEmptyProject()),
   );
+  const latestHistoryRef = useRef(history);
+  latestHistoryRef.current = history;
   const [busy, setBusy] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -341,7 +344,7 @@ export function useEditorStore() {
     setHistory((h) => {
       const result = dispatchCommand(h, { type: "merge", clipIds: cur.selectedClipIds });
       if (!result) {
-        setError("結合できませんでした。同一トラック上のクリップを選択してください。");
+        setError("結合できませんでした。同一トラック上で配置モードを揃えて選択してください。");
         return h;
       }
       return result.history;
@@ -391,6 +394,28 @@ export function useEditorStore() {
     },
     [dispatch],
   );
+
+  const [layoutChecking, setLayoutChecking] = useState(false);
+  const setSelectedLayoutMode = useCallback(async (layoutMode: ClipLayoutMode) => {
+    const snapshot = latestProjectRef.current;
+    const snapshotHistory = latestHistoryRef.current;
+    const ids = [...snapshot.selectedClipIds];
+    if (!ids.length || !snapshot.clips.some(c => ids.includes(c.id) && (c.layoutMode ?? "stretch") !== layoutMode)) return;
+    const epoch = projectEpochRef.current;
+    setError(null);
+    try {
+      if (layoutMode === "contain") {
+        setLayoutChecking(true);
+        const assetIds = new Set(snapshot.clips.filter(c => ids.includes(c.id)).flatMap(c => c.parts.map(p => p.assetId)));
+        await validateBrowserMediaLayouts(snapshot.assets.filter(a => assetIds.has(a.id)));
+      }
+      setHistory(h => {
+        if (projectEpochRef.current !== epoch || h !== snapshotHistory || getCurrentProject(h) !== snapshot) return h;
+        return dispatchCommand(h, { type: "layoutMode", clipIds: ids, layoutMode })?.history ?? h;
+      });
+    } catch (e) { if (projectEpochRef.current === epoch && latestHistoryRef.current === snapshotHistory && latestProjectRef.current === snapshot) setError(e instanceof Error ? e.message : String(e)); }
+    finally { setLayoutChecking(false); }
+  }, []);
 
   const fitSelectedClipsToCanvas = useCallback(() => {
     setError(null);
@@ -775,6 +800,7 @@ export function useEditorStore() {
     resizeClipDuration,
     updateClipTransform,
     fitSelectedClipsToCanvas,
+    layoutChecking, setSelectedLayoutMode,
     setCompositionSize,
     matchCompositionToSelectedClip,
     downloadSelectedClip,

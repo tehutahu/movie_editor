@@ -34,6 +34,8 @@ export type ClipPart = {
   sourceOutSec: number;
 };
 
+export type ClipLayoutMode = "stretch" | "contain";
+
 export type Clip = {
   id: string;
   trackId: string;
@@ -41,6 +43,7 @@ export type Clip = {
   durationSec: number;
   parts: ClipPart[];
   transform: ClipTransform;
+  layoutMode?: ClipLayoutMode;
 };
 
 export type EditorProject = {
