@@ -2,6 +2,7 @@
 
 import type { EditorStore } from "@/hooks/useEditorStore";
 import { resolvePlayheadSnappedStart } from "@/lib/editor/playheadSnap";
+import { timelineRulerMarks } from "@/lib/editor/timelineRuler";
 import { formatTimecode, pixelsPerSec, pxToSec, secToPx, filmstripOffsetPercent } from "@/lib/editor/thumbnailMapping";
 import { tracksSortedForTimeline } from "@/lib/editor/project";
 import { timelineTracksAreaHeightPx } from "@/lib/editor/timelineLayout";
@@ -417,9 +418,9 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
           className="timeline-ruler"
           style={{ width: rulerWidth + 48 }}
         >
-          {Array.from({ length: Math.ceil(project.compositionDurationSec) + 1 }, (_, i) => (
-            <span key={i} className="timeline-ruler-mark" style={{ left: secToPx(i, pps) + 48 }}>
-              {i}s
+          {timelineRulerMarks(project.compositionDurationSec, pps).map((sec) => (
+            <span key={sec} className="timeline-ruler-mark" style={{ left: secToPx(sec, pps) + 48 }}>
+              {sec}s
             </span>
           ))}
           <div
