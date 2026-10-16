@@ -338,3 +338,19 @@ export function trackAtIndex(tracks: readonly Track[], index: number): Track | u
   const sorted = tracksSortedForPreview(tracks);
   return sorted[index];
 }
+
+/** Shared, composition-pixel geometry for opt-in contain. Old stretch is untouched. */
+export function resolveContainContentRect(frame: PixelRect, width: number, height: number): PixelRect {
+  if (![frame.x, frame.y, frame.w, frame.h, width, height].every(Number.isFinite) ||
+      frame.w < 2 || frame.h < 2 || width <= 0 || height <= 0) throw new Error("素材の表示寸法が不正です。");
+  const k = Math.min(frame.w / width, frame.h / height);
+  const w = Math.max(2, Math.min(frame.w, 2 * Math.floor(width * k / 2)));
+  const h = Math.max(2, Math.min(frame.h, 2 * Math.floor(height * k / 2)));
+  return { x: frame.x + evenPx((frame.w - w) / 2), y: frame.y + evenPx((frame.h - h) / 2), w, h };
+}
+
+/** Ceil on the shared output grid, stable at floating-point part boundaries. */
+export function compositionFrameAt(time: number): number {
+  const q = time * 30;
+  return Math.abs(q - Math.round(q)) <= 1e-9 ? Math.round(q) : Math.ceil(q);
+}

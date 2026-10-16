@@ -173,12 +173,12 @@ export async function assertFfmpegAvailable(): Promise<{
   return { ffmpeg: ffmpegPath, ffprobe: ffprobePath };
 }
 
-type FfProbeJson = {
+export type FfProbeJson = {
   format?: { duration?: string; format_name?: string };
-  streams?: (VideoDisplayStream & { codec_type?: string })[];
+  streams?: (VideoDisplayStream & { codec_type?: string; start_time?: string; sample_aspect_ratio?: string; nb_frames?: string; tags?: Record<string, string>; side_data_list?: { side_data_type?: string; rotation?: unknown; displaymatrix?: string }[] })[];
 };
 
-async function probeMedia(inputPath: string): Promise<FfProbeJson> {
+export async function probeMedia(inputPath: string): Promise<FfProbeJson> {
   const ffprobePath = resolveFfprobePath();
   const probe = await run(ffprobePath, [
     "-v",

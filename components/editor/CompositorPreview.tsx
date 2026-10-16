@@ -11,11 +11,14 @@ import {
   hitTestTransformHandle,
   resolveActiveClipsAtPlayhead,
   resolveAudioClipAtPlayhead,
+  transformToPixelRect, resolveContainContentRect,
   transformFromMove,
   transformFromResize,
 } from "@/lib/editor/compositor";
 import type { ActiveClipLayer, TransformHandle } from "@/lib/editor/compositor";
 import type { ClipTransform } from "@/lib/editor/types";
+import { mediaLayoutKey, validateBrowserMediaLayouts, type MediaLayout } from "@/lib/editor/mediaLayoutClient";
+import type { Asset } from "@/lib/editor/types";
 import { createPreviewFrames } from "@/lib/editor/previewFrames";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -331,6 +334,32 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     [requestDraw],
   );
 
+  const layoutSources = JSON.stringify(project.assets.filter(a => project.clips.some(c => c.layoutMode === "contain" && c.parts.some(p => p.assetId === a.id))));
+  const [layouts, setLayouts] = useState<{ key: string; values: Map<string, MediaLayout>; error?: string }>({ key: "", values: new Map() });
+  const layoutsRef = useRef(layouts);
+  layoutsRef.current = layouts;
+  useEffect(() => {
+    let active = true;
+    const assets = JSON.parse(layoutSources) as Asset[];
+    if (!assets.length) return;
+    void (async () => {
+      const values = new Map<string, MediaLayout>();
+      const errors: string[] = [];
+      // One probe/decode at a time, including on project replacement. A stale
+      // effect can finish its current read but starts no additional media.
+      for (const a of assets) {
+        if (!active) return;
+        try {
+          const result = await validateBrowserMediaLayouts([a]);
+          for (const [k, v] of result) values.set(k, v);
+        } catch (e) { errors.push(`${a.displayName}: ${String(e)}`); }
+      }
+      if (active) { setLayouts({ key: layoutSources, values, ...(errors.length ? { error: errors.join(" / ") } : {}) }); requestDraw(); }
+    })();
+    return () => { active = false; };
+  }, [layoutSources, requestDraw]);
+  const layoutNotice = layoutSources !== "[]" ? layouts.key !== layoutSources ? "縦横比保持の素材を読込中…" : layouts.error : undefined;
+
   const drawRef = useRef<(() => void) | null>(null);
 
   const syncVideoTime = useCallback((media: HTMLVideoElement, targetSec: number, playing: boolean) => {
@@ -452,7 +481,16 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
       ctx.save();
       if (canDrawMedia(media)) {
-        ctx.drawImage(media, cx - drawW / 2, cy - drawH / 2, drawW, drawH);
+        if (layer.clip.layoutMode === "contain") {
+          const intrinsic = layoutsRef.current.values.get(mediaLayoutKey(layer.asset));
+          const actualW = media instanceof HTMLVideoElement ? media.videoWidth : media.naturalWidth;
+          const actualH = media instanceof HTMLVideoElement ? media.videoHeight : media.naturalHeight;
+          if (intrinsic && actualW === intrinsic.width && actualH === intrinsic.height) {
+            const frame = transformToPixelRect(transform, proj.compositionWidth, proj.compositionHeight);
+            const r = resolveContainContentRect(frame, intrinsic.width, intrinsic.height);
+            ctx.drawImage(media, r.x * w / proj.compositionWidth, r.y * h / proj.compositionHeight, r.w * w / proj.compositionWidth, r.h * h / proj.compositionHeight);
+          }
+        } else ctx.drawImage(media, cx - drawW / 2, cy - drawH / 2, drawW, drawH);
       }
       ctx.restore();
 
@@ -746,6 +784,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
   return (
     <section className="compositor-preview panel">
+      {layoutNotice && <div role="status" className="muted">{layoutNotice}</div>}
       <div
         ref={containerRef}
         className="compositor-canvas-wrap"

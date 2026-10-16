@@ -150,6 +150,9 @@ export function parseClip(
   compositionDurationSec: number,
 ): Clip {
   const o = assertRecord(`clips[${index}]`, raw);
+  if (o.layoutMode !== undefined && o.layoutMode !== "stretch" && o.layoutMode !== "contain") {
+    throw new Error("配置モードが不正です。");
+  }
   const trackId = assertStorageId(`clips[${index}].trackId`, String(o.trackId ?? ""));
   if (!trackIds.has(trackId)) {
     throw new Error(`clips[${index}].trackId が tracks に存在しません。`);
@@ -189,6 +192,7 @@ export function parseClip(
     durationSec,
     parts,
     transform: parseTransform(o.transform, `clips[${index}].transform`),
+    ...(o.layoutMode === undefined ? {} : { layoutMode: o.layoutMode as Clip["layoutMode"] }),
   };
 }
 

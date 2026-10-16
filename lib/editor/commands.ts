@@ -1,5 +1,5 @@
 import { applySpeedRestoreToProject } from "@/lib/editor/applySpeedRestore";
-import type { Clip, ClipTransform, EditorProject } from "@/lib/editor/types";
+import type { Clip, ClipLayoutMode, ClipTransform, EditorProject } from "@/lib/editor/types";
 import {
   addClipToProject,
   deleteClips,
@@ -18,6 +18,7 @@ export type EditorCommand =
   | { type: "move"; clipId: string; newStartSec: number; newTrackId?: string }
   | { type: "resize"; clipId: string; newDurationSec: number }
   | { type: "transform"; clipId: string; transform: ClipTransform }
+  | { type: "layoutMode"; clipIds: string[]; layoutMode: ClipLayoutMode }
   | { type: "delete"; clipIds: string[] }
   | { type: "addClip"; clip: Clip }
   | { type: "addTrack" }
@@ -48,6 +49,12 @@ export function applyCommand(
     }
     case "transform":
       return setClipTransform(project, command.clipId, command.transform);
+    case "layoutMode": {
+      if (command.layoutMode !== "stretch" && command.layoutMode !== "contain") return null;
+      const ids = new Set(command.clipIds);
+      if (!project.clips.some(c => ids.has(c.id) && (c.layoutMode ?? "stretch") !== command.layoutMode)) return null;
+      return { ...project, clips: project.clips.map(c => ids.has(c.id) ? { ...c, layoutMode: command.layoutMode } : c) };
+    }
     case "delete":
       return deleteClips(project, command.clipIds);
     case "addClip":

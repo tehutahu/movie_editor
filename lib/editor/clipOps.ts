@@ -184,6 +184,7 @@ export function mergeClips(
   const clips = clipIds.map((id) => project.clips.find((c) => c.id === id)).filter(Boolean) as Clip[];
   if (clips.length !== clipIds.length) return null;
 
+  if (!clips.every(c => (c.layoutMode ?? "stretch") === (clips[0]!.layoutMode ?? "stretch"))) return null;
   const trackId = clips[0]!.trackId;
   if (!clips.every((c) => c.trackId === trackId)) return null;
 
@@ -202,6 +203,7 @@ export function mergeClips(
     durationSec: totalDur,
     parts: mergedParts,
     transform: { ...sorted[0]!.transform },
+    ...(sorted[0]!.layoutMode ? { layoutMode: sorted[0]!.layoutMode } : {}),
   };
 
   const removeIds = new Set(clipIds);

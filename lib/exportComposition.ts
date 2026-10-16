@@ -1,3 +1,4 @@
+import { exportLayoutCompositionToFile } from "@/lib/exportLayoutComposition";
 import type { Asset, Clip, EditorProject, Track } from "@/lib/editor/types";
 import {
   clipsForExportComposition,
@@ -156,6 +157,7 @@ export async function exportCompositionToFile(params: {
   outputPath: string;
   onProgress?: (pct: number) => void;
 }): Promise<void> {
+  if (params.project.clips.some(c => c.layoutMode === "contain")) return exportLayoutCompositionToFile(params);
   const { project, jobDir, outputPath } = params;
   const { width: compW, height: compH } = getCompositionSize(project);
   const duration = project.compositionDurationSec;
