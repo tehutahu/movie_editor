@@ -29,6 +29,47 @@ let page;
     await page.locator('.timeline-clip').waitFor();
     check('drag video to timeline', await page.locator('.timeline-clip').count() === 1);
     const undo = page.getByTitle('Undo (Ctrl+Z)', { exact: true }), redo = page.getByTitle('Redo (Shift+Ctrl+Z)', { exact: true });
+    // A resize preview may exceed the source, while the resolved edit is
+    // unchanged. Exercise the real pointer → store → command path with Redo.
+    await page.locator('.timeline-clip').click({ position: { x: 50, y: 20 } });
+    await page.getByRole('button', { name: '新しい保存版を保存', exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('.busy-banner'));
+    await page.getByTitle('複製 (Ctrl+D)', { exact: true }).click();
+    assert.equal(await page.locator('.timeline-clip').count(), 2);
+    await undo.click();
+    assert.equal(await page.locator('.timeline-clip').count(), 1);
+    const initialWidth = await page.locator('.timeline-clip').evaluate(e => parseFloat(e.style.width));
+    const persistenceBefore = await page.locator('.project-persistence').innerText();
+    const dragEnd = async (delta, returnToStart = false) => {
+        const handle = await page.locator('.timeline-clip-resize').boundingBox();
+        const x = handle.x + handle.width / 2, y = handle.y + handle.height / 2;
+        await page.mouse.move(x, y); await page.mouse.down();
+        if (delta) await page.mouse.move(x + delta, y, { steps: 5 });
+        if (returnToStart) await page.mouse.move(x, y, { steps: 5 });
+        await page.mouse.up();
+    };
+    await dragEnd(80);
+    check('source-end clamped resize preserves clip length and pending Redo',
+        await redo.isEnabled() && await page.locator('.timeline-clip').evaluate(e => parseFloat(e.style.width)) === initialWidth);
+    check('source-end clamped resize preserves the saved document clean state',
+        await page.locator('.project-persistence').innerText() === persistenceBefore);
+    await captureEvidenceScreenshot(page, evidence + '/noop-resize-redo.png');
+    await redo.click();
+    check('Redo after clamped resize restores the duplicate', await page.locator('.timeline-clip').count() === 2);
+    await undo.click();
+    await dragEnd(0);
+    await dragEnd(60, true);
+    check('stationary and returned-to-origin resize retain pending Redo', await redo.isEnabled());
+    await dragEnd(-80);
+    check('actual resize changes length and invalidates stale Redo',
+        await redo.isDisabled() && Math.abs(await page.locator('.timeline-clip').evaluate(e => parseFloat(e.style.width)) - initialWidth + 80) < .01);
+    await undo.click();
+    check('one Undo restores the actual resize original length',
+        await page.locator('.timeline-clip').evaluate(e => parseFloat(e.style.width)) === initialWidth);
+    await redo.click();
+    check('one Redo reapplies the actual resize',
+        Math.abs(await page.locator('.timeline-clip').evaluate(e => parseFloat(e.style.width)) - initialWidth + 80) < .01);
+    await undo.click();
     const add = page.getByTitle('トラック追加 (Ctrl+T)');
     const seek = async (sec) => { await page.locator('.timeline-ruler').click({ position: { x: 48 + sec * 80, y: 8 } }); };
     let trackCount;

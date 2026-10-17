@@ -20,8 +20,12 @@ function fixture(first = "a", last = "b"): EditorProject {
 describe("merged clip resize regression #15", () => {
   it.each([2.99, 3, 3.01, 5, 6])("trims at %s without replacing later media", (duration) => {
     const p = fixture();
-    const result = resizeClip(p, "c", duration, assets)!;
-    const c = result.clips[0]!;
+    const before = structuredClone(p);
+    const result = resizeClip(p, "c", duration, assets);
+    if (duration === p.clips[0]!.durationSec) expect(result).toBeNull();
+    else expect(result).not.toBeNull();
+    expect(p).toEqual(before);
+    const c = (result ?? p).clips[0]!;
     expect(c.durationSec).toBeCloseTo(duration);
     expect(c.parts).toEqual(duration <= 3 ? [{ assetId: "a", sourceInSec: 0, sourceOutSec: duration }] : [p.clips[0]!.parts[0], { assetId: "b", sourceInSec: 2, sourceOutSec: duration - 1 }]);
     expect(p.clips[0]!.parts).toHaveLength(2);
