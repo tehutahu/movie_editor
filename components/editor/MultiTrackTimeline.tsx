@@ -1,6 +1,7 @@
 "use client";
 import { RestoreInputAudio, RestoreInputAudioSummary } from "./RestoreInputAudio";
 
+import { groupMoveSnapshot, matchesGroupMoveSnapshot, resolveGroupMove, type GroupMoveSnapshot, type GroupMovePlan } from "@/lib/editor/moveClips";
 import { trimStartReason, trimStartSnapshot } from "@/lib/editor/trimClipStart";
 import type { EditorProject } from "@/lib/editor/types";
 import type { EditorStore } from "@/hooks/useEditorStore";
@@ -189,6 +190,7 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
 }
 
 type DragState =
+  | { kind: "group"; clipId: string; startX: number; moved: boolean; pointerId: number; snapshot: GroupMoveSnapshot }
   | {
       kind: "move";
       clipId: string;
@@ -224,6 +226,7 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
     selectClip,
     addClipFromAsset,
     moveSelectedClip,
+    moveSelectedClips,
     resizeClipDuration,
   } = editor;
 
@@ -268,6 +271,15 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [rawDragPreview, setRawDragPreview] = useState<DragPreview | null>(null);
   const [altPressed, setAltPressed] = useState(false);
+  const [groupDelta, setGroupDelta] = useState<number | null>(null);
+  const [groupNotice, setGroupNotice] = useState<{ text: string; project: EditorProject; epoch: number } | null>(null);
+  useEffect(() => {
+    if (groupNotice && (groupNotice.project !== project || groupNotice.epoch !== editor.projectEpoch)) setGroupNotice(null);
+  }, [groupNotice, project, editor.projectEpoch]);
+  const committedGroupRef = useRef<{ snapshot: GroupMoveSnapshot; plan: GroupMovePlan } | null>(null);
+  const groupCurrent = drag?.kind === "group" && matchesGroupMoveSnapshot(project, editor.projectEpoch, timelineZoom, drag.snapshot) && !editor.areEditorShortcutsBlocked();
+  const groupPlan = drag?.kind === "group" && groupCurrent && groupDelta !== null
+    ? resolveGroupMove(project, drag.snapshot.clipIds, drag.clipId, groupDelta, pps, altPressed) : null;
   const [scrubbing, setScrubbing] = useState(false);
   const committedPreviewRef = useRef<DragPreview | null>(null);
 
@@ -284,13 +296,23 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
   } : rawDragPreview;
 
   useLayoutEffect(() => {
+    committedGroupRef.current = drag?.kind === "group" && groupPlan ? { snapshot: drag.snapshot, plan: groupPlan } : null;
+    if (drag?.kind === "group" && !groupCurrent) {
+      setDrag(null); setGroupDelta(null); setGroupNotice({ text: "選択や編集内容が変わったため、まとめ移動を取り消しました。", project, epoch: editor.projectEpoch });
+    }
+  }, [drag, groupPlan, groupCurrent, project, editor.projectEpoch]);
+
+  useLayoutEffect(() => {
     committedPreviewRef.current = dragPreview;
   }, [dragPreview]);
 
   useEffect(() => {
     if (!drag) return;
-    const onKey = (event: KeyboardEvent) => setAltPressed(event.altKey);
-    const cancel = () => { committedPreviewRef.current = null; setDrag(null); setRawDragPreview(null); };
+    const cancel = () => { committedPreviewRef.current = null; committedGroupRef.current = null; setDrag(null); setRawDragPreview(null); setGroupDelta(null); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && drag.kind === "group") { cancel(); return; }
+      setAltPressed(event.altKey);
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKey);
     window.addEventListener("blur", cancel);
@@ -382,9 +404,19 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
     const clip = project.clips.find((c) => c.id === clipId);
     if (!clip) return;
     committedPreviewRef.current = null;
+    committedGroupRef.current = null;
+    setGroupNotice(null);
 
     const additive = e.ctrlKey || e.metaKey;
     if (mode === "move") {
+      if (!additive && project.selectedClipIds.length >= 2 && project.selectedClipIds.includes(clipId)) {
+        if (editor.areEditorShortcutsBlocked()) return;
+        scrollRef.current?.setPointerCapture(e.pointerId);
+        setAltPressed(e.altKey); setGroupDelta(null);
+        setDrag({ kind: "group", clipId, startX: e.clientX, moved: false, pointerId: e.pointerId,
+          snapshot: groupMoveSnapshot(project, editor.projectEpoch, timelineZoom) });
+        return;
+      }
       selectClip(clipId, additive);
       scrollRef.current?.setPointerCapture(e.pointerId);
       setAltPressed(e.altKey);
@@ -419,6 +451,11 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
     if (!drag || e.pointerId !== drag.pointerId) return;
     const dx = e.clientX - drag.startX;
 
+    if (drag.kind === "group") {
+      if (!drag.moved && Math.abs(dx) < DRAG_THRESHOLD_PX) return;
+      setDrag({ ...drag, moved: true }); setAltPressed(e.altKey); setGroupDelta(pxToSec(dx, pps));
+      return;
+    }
     if (drag.kind === "move") {
       const dy = e.clientY - drag.startY;
       if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
@@ -448,13 +485,17 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
   function onPointerUp(e: React.PointerEvent) {
     if (!drag || e.pointerId !== drag.pointerId) return;
     const preview = committedPreviewRef.current;
+    const group = committedGroupRef.current;
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
       // ignore
     }
 
-    if (drag.kind === "move" && preview && drag.moved) {
+    if (drag.kind === "group" && group && drag.moved) {
+      if (group.plan.reason) setGroupNotice({ text: group.plan.reason, project, epoch: editor.projectEpoch });
+      else moveSelectedClips(group.snapshot, group.plan.deltaSec);
+    } else if (drag.kind === "move" && preview && drag.moved) {
       const clip = project.clips.find((c) => c.id === preview.clipId);
       // Commit the rendered preview, including during playback. A drag that
       // returns to its original position must preserve both Undo and Redo.
@@ -467,10 +508,15 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
 
     setDrag(null);
     setRawDragPreview(null);
+    setGroupDelta(null);
+    committedGroupRef.current = null;
     committedPreviewRef.current = null;
   }
 
   function clipDisplayState(clipId: string, clip: { timelineStartSec: number; trackId: string; durationSec: number }) {
+    if (drag?.kind === "group" && groupPlan && drag.snapshot.clipIds.includes(clipId)) {
+      return { startSec: clip.timelineStartSec + groupPlan.deltaSec, trackId: clip.trackId, durationSec: clip.durationSec, dragging: true };
+    }
     if (dragPreview?.clipId === clipId) {
       return {
         startSec: dragPreview.startSec,
@@ -491,6 +537,7 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
     <section className="multi-track-timeline panel" ref={timelineRef}>
       <div className="track-delete-status" role="status" aria-live="polite">{deletionNotice?.project === project ? deletionNotice.message : ""}</div>
       <TimelineToolbar editor={editor} />
+      <div className="group-move-status" role="status" aria-live="polite">{groupPlan ? groupPlan.reason ?? "選択中のクリップを同じ時間差でまとめて移動します（トラックは変わりません）" : (groupNotice?.project === project && groupNotice.epoch === editor.projectEpoch ? groupNotice.text : "") || (project.selectedClipIds.length >= 2 ? "選択済みクリップをドラッグすると、まとめて横に移動できます" : "")}</div>
       <div
         className="timeline-scroll"
         ref={scrollRef}
@@ -498,8 +545,8 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
         onPointerDown={onScrubPointerDown}
         onPointerMove={(e) => { onPointerMove(e); onScrubPointerMove(e); }}
         onPointerUp={(e) => { onPointerUp(e); onScrubPointerUp(e); }}
-        onPointerCancel={(e) => { committedPreviewRef.current = null; setDrag(null); setRawDragPreview(null); onScrubPointerUp(e); }}
-        onLostPointerCapture={() => { committedPreviewRef.current = null; setDrag(null); setRawDragPreview(null); }}
+        onPointerCancel={(e) => { committedGroupRef.current = null; committedPreviewRef.current = null; setDrag(null); setGroupDelta(null); setRawDragPreview(null); onScrubPointerUp(e); }}
+        onLostPointerCapture={() => { committedGroupRef.current = null; committedPreviewRef.current = null; setDrag(null); setGroupDelta(null); setRawDragPreview(null); }}
       >
         <div
           className="timeline-ruler"
@@ -551,7 +598,9 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
                 return (
                   <div
                     key={clip.id}
-                    className={`timeline-clip${selected ? " timeline-clip--selected" : ""}${asset?.kind === "image" ? " timeline-clip--image" : ""}${st.dragging ? " timeline-clip--dragging" : ""}`}
+                    data-clip-id={clip.id}
+                    aria-label={`${asset?.displayName ?? "clip"}${selected ? "（選択中）" : ""}`}
+                    className={`timeline-clip${groupPlan?.reason && st.dragging ? " timeline-clip--invalid-move" : ""}${selected ? " timeline-clip--selected" : ""}${asset?.kind === "image" ? " timeline-clip--image" : ""}${st.dragging ? " timeline-clip--dragging" : ""}`}
                     style={{
                       left: secToPx(st.startSec, pps) + 48,
                       width: secToPx(st.durationSec, pps),

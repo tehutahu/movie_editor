@@ -1109,3 +1109,16 @@ button.primary {
 .restore-rate-support p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .restore-rate-support button { margin: 0 6px 8px 0; }
 .restore-rate-warning { color: #f9c678; }
+
+.group-move-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-height: 1.25rem;
+  padding-inline: 8px;
+  pointer-events: none;
+}
+.timeline-clip--invalid-move {
+  outline: 2px solid #f87171;
+}
+
+.group-move-status:empty { display: none; }
