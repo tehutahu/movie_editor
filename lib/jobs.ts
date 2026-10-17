@@ -30,8 +30,24 @@ export type JobRecord = {
   assetId?: string | undefined;
 };
 
-const jobs = new Map<string, JobRecord>();
-const writes = new Map<string, Promise<void>>();
+type JobStore = {
+  jobs: Map<string, JobRecord>;
+  writes: Map<string, Promise<void>>;
+};
+// Route compilation/HMR may reevaluate this module while a worker still uses
+// its old closure. Keep both records and their write queues for this process,
+// isolated by the normalized storage root. This is not a durable worker queue.
+const globalState = globalThis as typeof globalThis & {
+  __movieJobStoresV1?: Map<string, JobStore>;
+};
+const stores = globalState.__movieJobStoresV1 ??= new Map<string, JobStore>();
+const root = path.resolve(JOBS_ROOT);
+let store = stores.get(root);
+if (!store) {
+  store = { jobs: new Map(), writes: new Map() };
+  stores.set(root, store);
+}
+const { jobs, writes } = store;
 function queuePersist(rec: JobRecord) {
   const next = (writes.get(rec.id) ?? Promise.resolve()).then(() => persistJob(rec));
   writes.set(rec.id, next);
