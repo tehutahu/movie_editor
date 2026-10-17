@@ -20,6 +20,8 @@ import type { ClipTransform } from "@/lib/editor/types";
 import { mediaLayoutKey, validateBrowserMediaLayouts, type MediaLayout } from "@/lib/editor/mediaLayoutClient";
 import type { Asset } from "@/lib/editor/types";
 import { createPreviewFrames } from "@/lib/editor/previewFrames";
+import { parseExactSeek } from "@/lib/editor/exactSeek";
+import { ExactSeekInput } from "./ExactSeekInput";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const EDITOR_HELP_ITEMS = [
@@ -192,6 +194,23 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   const [hoverCursor, setHoverCursor] = useState<string>("default");
   const [helpOpen, setHelpOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const seekBlocked = Boolean(editor.busy) || editor.persistence.locked || helpOpen;
+  const seekBlockedRef = useRef(seekBlocked);
+  seekBlockedRef.current = seekBlocked;
+  const commitExactSeek = (draft: string, epoch: number): string | undefined => {
+    const current = editor.getPreviewSeekState();
+    if (current.blocked || seekBlockedRef.current || current.epoch !== epoch || document.fullscreenElement === containerRef.current) return;
+    const parsed = parseExactSeek(draft, current.duration);
+    if (parsed.value === undefined) return parsed.error;
+    // Stop refs before React state commits so a queued tick cannot overwrite this seek.
+    if (playRafRef.current !== null) cancelAnimationFrame(playRafRef.current);
+    playRafRef.current = null;
+    lastTickRef.current = null;
+    isPlayingRef.current = false;
+    playheadSecRef.current = parsed.value;
+    setIsPlaying(false);
+    setPlayheadSec(parsed.value);
+  };
   const [fullscreenControlsVisible, setFullscreenControlsVisible] = useState(false);
   const hideControlsTimerRef = useRef<number | null>(null);
 
@@ -563,6 +582,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     }
 
     const loop = (ts: number) => {
+      if (!isPlayingRef.current) return;
       if (lastTickRef.current !== null) {
         const dt = (ts - lastTickRef.current) / 1000;
         const duration = projectRef.current.compositionDurationSec;
@@ -865,14 +885,18 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
         </div>
       ) : null}
       {!isFullscreen ? (
-        <PreviewControlsBar
-          isPlaying={isPlaying}
-          onSeekStart={seekStart}
-          onStepBack={stepBack}
-          onTogglePlay={togglePlay}
-          onStepForward={stepForward}
-          onSeekEnd={seekEnd}
-        />
+        <div className="preview-transport">
+          <PreviewControlsBar
+            isPlaying={isPlaying}
+            onSeekStart={seekStart}
+            onStepBack={stepBack}
+            onTogglePlay={togglePlay}
+            onStepForward={stepForward}
+            onSeekEnd={seekEnd}
+          />
+          <ExactSeekInput key={`${editor.projectEpoch}:${seekBlocked}`} position={project.playheadSec}
+            epoch={editor.projectEpoch} disabled={seekBlocked} onCommit={commitExactSeek} />
+        </div>
       ) : null}
     </section>
   );

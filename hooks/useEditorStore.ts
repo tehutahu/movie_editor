@@ -226,10 +226,16 @@ export function useEditorStore() {
       const cur = getCurrentProject(h);
       const raw = typeof sec === "function" ? sec(cur.playheadSec) : sec;
       const clamped = Math.max(0, Math.min(raw, cur.compositionDurationSec));
-      if (Math.abs(clamped - cur.playheadSec) < 1e-6) return h;
+      if (clamped === cur.playheadSec) return h;
       return updateEditorView(h, { playheadSec: clamped });
     });
   }, []);
+
+  const getPreviewSeekState = useCallback(() => ({
+    epoch: projectEpochRef.current,
+    duration: latestProjectRef.current.compositionDurationSec,
+    blocked: mutationLockedRef.current,
+  }), []);
 
   const setExportBaseName = useCallback((name: string) => {
     setHistory((h) => {
@@ -819,7 +825,7 @@ export function useEditorStore() {
   ]);
 
   return {
-    persistence, projectEpoch,
+    persistence, projectEpoch, getPreviewSeekState,
     project,
     busy,
     error,
