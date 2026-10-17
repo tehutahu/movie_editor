@@ -833,10 +833,10 @@ export function useEditorStore() {
         deleteSelected();
         return;
       }
-      if (mod && e.key === "z" && e.shiftKey) {
+      if (mod && (e.key === "z" || e.key === "Z") && e.shiftKey) {
         e.preventDefault();
         redoEdit();
-      } else if (mod && e.key === "z") {
+      } else if (mod && (e.key === "z" || e.key === "Z")) {
         e.preventDefault();
         undoEdit();
       }
