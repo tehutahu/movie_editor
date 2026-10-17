@@ -17,7 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:typecheck": "tsc --noEmit",
-    "test:browser": "node scripts/verify-editor-history.mjs && node scripts/verify-project-persistence.mjs && node scripts/verify-playhead-snap.mjs && node scripts/verify-ruler-labels.mjs && node scripts/verify-preview-invalidation.mjs && node scripts/verify-contain-layout.mjs && node scripts/verify-asset-addition.mjs && node scripts/verify-empty-tracks.mjs && node scripts/verify-trim-prefix.mjs && node scripts/verify-exact-seek.mjs && node scripts/verify-multipart-boundaries.mjs && node scripts/verify-restore-input-rate.mjs && node scripts/verify-mixed-restore.mjs && node scripts/verify-help-modal.mjs"
+    "test:browser": "node scripts/verify-editor-history.mjs && node scripts/verify-project-persistence.mjs && node scripts/verify-playhead-snap.mjs && node scripts/verify-ruler-labels.mjs && node scripts/verify-preview-invalidation.mjs && node scripts/verify-contain-layout.mjs && node scripts/verify-asset-addition.mjs && node scripts/verify-empty-tracks.mjs && node scripts/verify-trim-prefix.mjs && node scripts/verify-exact-seek.mjs && node scripts/verify-multipart-boundaries.mjs && node scripts/verify-restore-input-rate.mjs && node scripts/verify-mixed-restore.mjs && node scripts/verify-help-modal.mjs && node scripts/verify-group-move.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.4.1",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRestoreInputAudio } from "@/hooks/useRestoreInputAudio";
+import { matchesGroupMoveSnapshot, type GroupMoveSnapshot } from "@/lib/editor/moveClips";
 import { applyExactSeek } from "@/lib/editor/exactSeek";
 import {
   useCallback,
@@ -109,7 +110,14 @@ export function useEditorStore() {
   const sampleRateRef = useRef(sampleRateHz);
   sampleRateRef.current = sampleRateHz;
   const copySampleRate = useCallback((value: string) => { sampleRateRef.current = value; setSampleRateHzState(value); }, []);
-  const [timelineZoom, setTimelineZoom] = useState(1);
+  const [timelineZoom, setTimelineZoomState] = useState(1);
+  const timelineZoomRef = useRef(timelineZoom);
+  timelineZoomRef.current = timelineZoom;
+  const setTimelineZoom = useCallback((next: number | ((previous: number) => number)) => {
+    const value = typeof next === "function" ? next(timelineZoomRef.current) : next;
+    timelineZoomRef.current = value;
+    setTimelineZoomState(value);
+  }, []);
   const [clipExportBusyId, setClipExportBusyId] = useState<string | null>(null);
 
   const sessionRef = useRef<string | null>(null);
@@ -461,6 +469,15 @@ export function useEditorStore() {
     },
     [dispatch],
   );
+
+  const moveSelectedClips = useCallback((snapshot: GroupMoveSnapshot, deltaSec: number) => {
+    if (areEditorShortcutsBlocked()) return;
+    setHistory(h => {
+      const current = getCurrentProject(h);
+      if (areEditorShortcutsBlocked() || !matchesGroupMoveSnapshot(current, projectEpochRef.current, timelineZoomRef.current, snapshot)) return h;
+      return dispatchCommand(h, { type: "moveMany", clipIds: snapshot.clipIds, deltaSec })?.history ?? h;
+    });
+  }, [areEditorShortcutsBlocked]);
 
   const resizeClipDuration = useCallback(
     (clipId: string, newDurationSec: number) => {
@@ -893,6 +910,7 @@ export function useEditorStore() {
     deleteSelected,
     duplicateSelected,
     moveSelectedClip,
+    moveSelectedClips,
     resizeClipDuration,
     updateClipTransform,
     fitSelectedClipsToCanvas,

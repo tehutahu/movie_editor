@@ -13,7 +13,7 @@ See [README.md](README.md) for user-facing setup and usage.
 | Area | Capabilities |
 |------|----------------|
 | Asset library | Multi-file upload (video + image), drag to timeline |
-| Timeline | Multi-track, drag/move, edge resize, split/merge/delete/duplicate, overlap resolution, zoom, filmstrip thumbnails (video) |
+| Timeline | Multi-track, relative horizontal group move for selected clips (fixed tracks, atomic collision rejection), drag/move, edge resize, split/merge/delete/duplicate, overlap resolution, zoom, filmstrip thumbnails (video) |
 | Preview | Canvas compositor (position/scale), playback controls, frame step, fullscreen, audio from top video track |
 | Editing | Undo/redo command history, resizable preview/timeline split (persisted in `localStorage`) |
 | Jobs | Speed restore, per-clip segment export, full composition export (variable resolution mp4) |
