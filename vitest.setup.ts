@@ -8,10 +8,11 @@ const testRoot = await vi.hoisted(async () => {
   process.env.MOVIE_EDITOR_STORAGE_ROOT = root;
   return root;
 });
-afterAll(async () => { await rm(testRoot, { recursive: true, force: true }); });
-import { clearJobStoreForTests } from "@/lib/jobs";
+afterAll(async () => { await flushJobWritesForTests(); await rm(testRoot, { recursive: true, force: true }); });
+import { clearJobStoreForTests, flushJobWritesForTests } from "@/lib/jobs";
 
-afterEach(() => {
+afterEach(async () => {
   delete process.env.MAX_UPLOAD_BYTES;
+  await flushJobWritesForTests();
   clearJobStoreForTests();
 });
