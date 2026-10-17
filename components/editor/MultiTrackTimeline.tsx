@@ -160,7 +160,7 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
               type="number"
               step={1000}
               value={sampleRateHz}
-              disabled={Boolean(busy) || editor.persistence.locked}
+              disabled={Boolean(busy) || editor.persistence.locked || editor.restoreHelpBlocked}
               onChange={(e) => setSampleRateHz(e.target.value)}
             />
           </label>

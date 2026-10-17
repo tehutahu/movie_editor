@@ -51,7 +51,10 @@ export function useRestoreInputAudio(project: EditorProject, epoch: number, bloc
   }, [key, observation, getCurrent, copyRate]);
   return { targetName: target?.name ?? "", hasTarget: Boolean(target),
     status: !target ? "unselected" : blocked ? "blocked" : visible?.status ?? "loading",
-    audio: visible?.audio, copy, retry: () => setRetry(v => v + 1),
+    audio: visible?.audio, copy, retry: () => {
+      const state = getCurrent();
+      if (!state.blocked && restoreInputTarget(state.project, state.epoch)?.key === key) setRetry(v => v + 1);
+    },
     copiedRate: !blocked && copied?.key === key && copied.serial === serial.current ? copied.rate : null,
     manualEdit: () => setCopied(null),
   };

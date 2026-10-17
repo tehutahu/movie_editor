@@ -98,6 +98,12 @@ export function useEditorStore() {
   const [speedFactor, setSpeedFactor] = useState("2");
   const [sampleRateHz, setSampleRateHzState] = useState("44100");
   const restoreSubmissionRef = useRef(false);
+  const [restoreHelpBlocked, setRestoreHelpBlockedState] = useState(false);
+  const restoreHelpBlockedRef = useRef(false);
+  const setRestoreHelpBlocked = useCallback((value: boolean) => {
+    restoreHelpBlockedRef.current = value;
+    setRestoreHelpBlockedState(value);
+  }, []);
   const speedFactorRef = useRef(speedFactor);
   speedFactorRef.current = speedFactor;
   const sampleRateRef = useRef(sampleRateHz);
@@ -157,9 +163,9 @@ export function useEditorStore() {
 
   const mutationLockedRef = useRef(false);
   mutationLockedRef.current = Boolean(busy) || persistence.locked;
-  const getRestoreInputState = useCallback(() => ({ project: latestProjectRef.current, epoch: projectEpochRef.current, blocked: mutationLockedRef.current || restoreSubmissionRef.current }), []);
-  const restoreInputAudio = useRestoreInputAudio(project, projectEpoch, Boolean(busy) || persistence.locked, getRestoreInputState, copySampleRate);
-  const setSampleRateHz = (value: string) => { if (mutationLockedRef.current || restoreSubmissionRef.current) return; restoreInputAudio.manualEdit(); copySampleRate(value); };
+  const getRestoreInputState = useCallback(() => ({ project: latestProjectRef.current, epoch: projectEpochRef.current, blocked: mutationLockedRef.current || restoreSubmissionRef.current || restoreHelpBlockedRef.current }), []);
+  const restoreInputAudio = useRestoreInputAudio(project, projectEpoch, Boolean(busy) || persistence.locked || restoreHelpBlocked, getRestoreInputState, copySampleRate);
+  const setSampleRateHz = (value: string) => { if (mutationLockedRef.current || restoreSubmissionRef.current || restoreHelpBlockedRef.current) return; restoreInputAudio.manualEdit(); copySampleRate(value); };
   // Record success only after the history commit adopted this exact result.
   // Updaters stay pure, and a stale result never creates a completed step.
   useEffect(() => {
@@ -859,6 +865,7 @@ export function useEditorStore() {
     sampleRateHz,
     setSampleRateHz,
     restoreInputAudio,
+    restoreHelpBlocked, setRestoreHelpBlocked,
     timelineZoom,
     setTimelineZoom,
     clipExportBusyId,

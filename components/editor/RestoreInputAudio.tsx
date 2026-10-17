@@ -5,7 +5,7 @@ export function RestoreInputAudio({ editor }: { editor: EditorStore }) {
   const input = editor.restoreInputAudio, audio = input.audio;
   const known = input.status === "ready" && audio?.status === "known";
   const reason = !input.hasTarget ? "速度復元する動画クリップを選択してください。"
-    : input.status === "blocked" ? "処理が終わってから操作してください。"
+    : input.status === "blocked" ? editor.restoreHelpBlocked ? "ヘルプを閉じてから操作してください。" : "処理が終わってから操作してください。"
     : input.status === "loading" ? "入力音声を取得中です。"
     : input.status === "error" ? "入力音声を取得できませんでした。手動の設定で復元できます。"
     : audio?.status === "none" ? "音声なし。Hzの設定は使いません。"
@@ -25,10 +25,10 @@ export function RestoreInputAudio({ editor }: { editor: EditorStore }) {
 export function RestoreInputAudioSummary({ editor }: { editor: EditorStore }) {
   const input = editor.restoreInputAudio, audio = input.audio;
   const known = input.status === "ready" && audio?.status === "known";
-  const state = input.status === "unselected" ? "動画未選択" : input.status === "blocked" ? "処理中"
+  const state = input.status === "unselected" ? "動画未選択" : input.status === "blocked" ? editor.restoreHelpBlocked ? "ヘルプ表示中" : "処理中"
     : input.status === "loading" ? "取得中" : input.status === "error" ? "取得失敗"
     : audio?.status === "none" ? "音声なし" : "入力Hz不明";
-  return <summary data-restore-rate-summary className={known && Number(editor.sampleRateHz) !== audio.sampleRateHz ? "restore-rate-warning" : undefined}>
+  return <summary onKeyDown={event => { if (event.key === " " || event.key === "Enter") event.stopPropagation(); }} data-restore-rate-summary className={known && Number(editor.sampleRateHz) !== audio.sampleRateHz ? "restore-rate-warning" : undefined}>
     {known ? `取得時 ${audio.sampleRateHz} / 基準 ${editor.sampleRateHz} Hz${Number(editor.sampleRateHz) !== audio.sampleRateHz ? "（差あり）" : ""}` : `入力音声: ${state} / 基準 ${editor.sampleRateHz} Hz`}
   </summary>;
 }
