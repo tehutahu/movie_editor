@@ -1,3 +1,4 @@
+import { trimClipStart, trimStartReason } from "@/lib/editor/trimClipStart";
 import { addAssetAtPlayhead } from "@/lib/editor/addAssetAtPlayhead";
 import { applySpeedRestoreToProject } from "@/lib/editor/applySpeedRestore";
 import type { Clip, ClipLayoutMode, ClipTransform, EditorProject } from "@/lib/editor/types";
@@ -14,6 +15,7 @@ import {
 import { addTrackToProject, deleteEmptyTrackFromProject } from "@/lib/editor/project";
 
 export type EditorCommand =
+  | { type: "trimStart"; clipId: string; atSec: number }
   | { type: "split"; clipId: string; atSec: number }
   | { type: "merge"; clipIds: string[] }
   | { type: "move"; clipId: string; newStartSec: number; newTrackId?: string }
@@ -41,6 +43,11 @@ export function applyCommand(
   command: EditorCommand,
 ): EditorProject | null {
   switch (command.type) {
+    case "trimStart": {
+      if (project.selectedClipIds.length !== 1 || project.selectedClipIds[0] !== command.clipId ||
+          trimStartReason({ ...project, playheadSec: command.atSec }, false)) return null;
+      return trimClipStart(project, command.clipId, command.atSec);
+    }
     case "split":
       return splitClipAtPlayhead(project, command.clipId, command.atSec);
     case "merge":

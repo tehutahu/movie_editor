@@ -23,6 +23,7 @@ import {
   updateEditorView,
   type CommandHistory,
 } from "@/lib/editor/commandHistory";
+import { matchesTrimStartSnapshot, type TrimStartSnapshot } from "@/lib/editor/trimClipStart";
 import { newId } from "@/lib/newId";
 import type { EditorCommand } from "@/lib/editor/commands";
 import { applyCommand } from "@/lib/editor/commands";
@@ -361,6 +362,15 @@ export function useEditorStore() {
     // a deletion computed for an obsolete project or reuse a T-number as ID.
     setHistory(h => h === snapshot && !mutationLockedRef.current ? result.history : h);
     return result.project;
+  }, []);
+
+  const trimSelectedStartAtPlayhead = useCallback((snapshot: TrimStartSnapshot | null) => {
+    if (!snapshot || mutationLockedRef.current) return;
+    setHistory(current => {
+      const cur = getCurrentProject(current);
+      if (mutationLockedRef.current || !matchesTrimStartSnapshot(cur, projectEpochRef.current, snapshot)) return current;
+      return dispatchCommand(current, { type: "trimStart", clipId: snapshot.clipId, atSec: cur.playheadSec })?.history ?? current;
+    });
   }, []);
 
   const splitAtPlayhead = useCallback(() => {
@@ -837,6 +847,7 @@ export function useEditorStore() {
       clip.timelineStartSec === assetAdditionNotice.startSec) ? assetAdditionNotice.text : "",
     addTrack,
     deleteEmptyTrack,
+    trimSelectedStartAtPlayhead,
     splitAtPlayhead,
     mergeSelected,
     deleteSelected,
