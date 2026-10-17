@@ -143,3 +143,22 @@ it.skipIf(!real)("real ffmpeg: 50 parts preserve the independently concatenated 
   const frames = ff(["-i", output, "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]);
   expect(frames.length / (64 * 64 * 3)).toBe(75);
 }, 120000);
+
+it.skipIf(!real)("real ffmpeg: all planned tail packets decode across modulo-three counts and signed duration drift", async () => {
+  for (const [i, duration] of [1, 1.02, 1.06].entries()) {
+    for (const drift of [-1e-6, 0, 1e-6]) {
+      const c = clip(1.75, 1, 1.25); c.parts[1].sourceOutSec = .5 + duration;
+      c.durationSec = .25 + duration + drift;
+      const result = await exportCase(`tail-${i}-${drift}`, c);
+      const prepared = path.join(result.dir, "part_0.mp4.keep"), decoded = raw(prepared);
+      const expectedFrames = 7 + 30 + i;
+      const probe = JSON.parse(execFileSync(process.env.FFPROBE_PATH ?? "/usr/bin/ffprobe", ["-v", "error", "-select_streams", "v:0", "-count_frames", "-show_entries", "stream=nb_frames,nb_read_frames", "-of", "json", prepared], { encoding: "utf8" }));
+      await writeFile(path.join(result.dir, "tail-frame-count.json"), JSON.stringify(probe, null, 2));
+      expect(Number(probe.streams[0].nb_frames)).toBe(expectedFrames);
+      expect(Number(probe.streams[0].nb_read_frames)).toBe(expectedFrames);
+      expect(decoded.length / (320 * 320 * 3)).toBe(expectedFrames);
+      expect(readFrame(decoded, expectedFrames - 1)).toEqual({ id: 44 + i, asset: "B" });
+      if (i === 0 && drift > 0) expect(readFrame(raw(result.output), 90)).toEqual({ id: 44, asset: "B" });
+    }
+  }
+}, 120000);

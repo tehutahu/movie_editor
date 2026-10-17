@@ -75,10 +75,13 @@ export async function renderClipToFile(params: {
     // Keep the legacy AVTB rounding for already aligned decoded output.
     filters.push(`${videos.join("")}concat=n=${videos.length}:v=1:a=0,settb=AVTB,setpts=round(N*1000000/30)[v]`);
     if (audios.length) filters.push(`${audios.join("")}concat=n=${audios.length}:v=0:a=1[a]`);
+    // Concat leaves frame duration unset. Preserve encoded PTS/DTS while
+    // giving the final packet its CFR duration, so MP4 does not discard it
+    // at a zero-length edit boundary (notably 37-frame clips).
     await runFfmpegCommand(["-y", ...paths.flatMap((p) => ["-i", p]),
       "-filter_complex", filters.join(";"), "-map", "[v]",
       ...(audios.length ? ["-map", "[a]", "-c:a", "aac"] : ["-an"]),
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", String(clip.durationSec), "-movflags", "+faststart", outputPath],
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-bsf:v", "setts=pts=PTS:dts=DTS:duration=1/(30*TB)", "-t", String(clip.durationSec), "-movflags", "+faststart", outputPath],
     { totalDurationSec: clip.durationSec });
   } finally {
     await Promise.all(paths.map((p) => unlink(p).catch(() => undefined)));
