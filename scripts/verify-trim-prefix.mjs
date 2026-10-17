@@ -27,7 +27,7 @@ async function seek(t){const b=await page.locator('.timeline-scroll').boundingBo
 (async()=>{
   ff(['-y','-f','lavfi','-i','testsrc2=s=320x240:r=30:d=6','-f','lavfi','-i','sine=frequency=440:duration=6','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',`${evidence}/source.mp4`]);
   ff(['-y','-f','lavfi','-i','color=red:s=320x320','-frames:v','1',`${evidence}/image.png`]);
-  await suite.start();const browser=await suite.launch();page=await browser.newPage({viewport:{width:1600,height:1000}});
+  await suite.start();const browser=await suite.launch();page=await browser.newPage({viewport:{width:1800,height:1000}});
   page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()==='DELETE'||r.url().includes('/api/storage/prune')||(r.url().includes('/api/storage/session')&&r.postDataJSON()?.action==='release'))forbidden.push(r.url());});
   await page.goto(baseURL);const trim=page.locator('[data-trim-start]');
   const undo=page.getByTitle('Undo (Ctrl+Z)',{exact:true}),redo=page.getByTitle('Redo (Shift+Ctrl+Z)',{exact:true});
