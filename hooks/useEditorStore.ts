@@ -1,5 +1,6 @@
 "use client";
 
+import { applyExactSeek } from "@/lib/editor/exactSeek";
 import {
   useCallback,
   useEffect,
@@ -229,6 +230,17 @@ export function useEditorStore() {
       if (Math.abs(clamped - cur.playheadSec) < 1e-6) return h;
       return updateEditorView(h, { playheadSec: clamped });
     });
+  }, []);
+
+  const getPreviewSeekState = useCallback(() => ({
+    epoch: projectEpochRef.current,
+    duration: latestProjectRef.current.compositionDurationSec,
+    blocked: mutationLockedRef.current,
+  }), []);
+
+  const setExactPlayheadSec = useCallback((target: number, expectedEpoch: number) => {
+    setHistory(current => applyExactSeek(current, target, expectedEpoch,
+      projectEpochRef.current, mutationLockedRef.current));
   }, []);
 
   const setExportBaseName = useCallback((name: string) => {
@@ -819,7 +831,7 @@ export function useEditorStore() {
   ]);
 
   return {
-    persistence, projectEpoch,
+    persistence, projectEpoch, getPreviewSeekState, setExactPlayheadSec,
     project,
     busy,
     error,

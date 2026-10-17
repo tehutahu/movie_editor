@@ -654,8 +654,37 @@ code {
   flex-shrink: 0;
 }
 
-.compositor-preview > .preview-controls {
+.preview-transport {
   margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+  flex-shrink: 0;
+}
+
+.exact-seek {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  font-size: 0.75rem;
+}
+
+.exact-seek input {
+  width: 100px;
+  min-width: 0;
+  padding: 2px 4px;
+}
+
+.exact-seek-hint {
+  color: var(--muted);
+}
+
+.exact-seek-error {
+  color: #f87171;
 }
 
 .preview-controls button {
