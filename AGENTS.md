@@ -26,7 +26,7 @@ Do not assume these exist when testing or extending the app:
 
 - **Project persistence extensions** — no autosave, bundled media ZIP, collaboration, or Blob resume guarantee. Local explicit versioned save/load is implemented.
 - **merge-kept UI** — `POST /api/jobs/merge-kept` works but is only wired in the legacy editor, not the NLE.
-- **Track management** — add track only; no delete, reorder, mute, solo, or lock.
+- **Track management** — add tracks and delete empty tracks, keeping at least one track. Deletion compresses T numbers while preserving order and ties, and supports Undo. No deletion of populated tracks, reorder, mute, solo, or lock.
 - **Asset management** — no delete/rename in the NLE asset panel.
 - **Advanced editing** — no transitions, effects, text overlays, opacity, volume per clip, ripple/roll trim, copy/paste, or grid snapping. Clip moves snap their start/end to the playhead within 8 CSS px (Alt bypass); overlap avoidance remains enabled.
 - **Export options** — mp4 only; composition resolution presets (16:9 / 9:16 / 1:1), auto-match on first clip placement, manual match-to-selected-clip; no custom width×height input or frame-rate picker. Clips default to stretch-fit; explicit per-clip contain fits the full source inside the transform rect with transparent margins and image alpha. Old projects retain stretch. Selected-clip downloads remain source exports with separate layout rules (see README).
