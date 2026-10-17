@@ -1,14 +1,40 @@
 "use client";
 
+import type { EditorProject } from "@/lib/editor/types";
 import type { EditorStore } from "@/hooks/useEditorStore";
 import { resolvePlayheadSnappedStart } from "@/lib/editor/playheadSnap";
 import { timelineRulerMarks } from "@/lib/editor/timelineRuler";
 import { formatTimecode, pixelsPerSec, pxToSec, secToPx, filmstripOffsetPercent } from "@/lib/editor/thumbnailMapping";
 import { tracksSortedForTimeline } from "@/lib/editor/project";
 import { timelineTracksAreaHeightPx } from "@/lib/editor/timelineLayout";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 const DRAG_THRESHOLD_PX = 4;
+
+function TrackDeletionControl({ order, reason, buttonRef, onDelete }: {
+  order: number; reason?: string;
+  buttonRef: (element: HTMLButtonElement | null) => void; onDelete: () => void;
+}) {
+  // Track IDs are runtime UUIDs; useId keeps the accessibility linkage stable
+  // across server rendering and client hydration without changing the model.
+  const reasonId = useId();
+  return <span className="timeline-track-label">
+    <span>T{order + 1}</span>
+    <button type="button" className="track-delete-button" ref={buttonRef}
+      aria-label={`空トラック T${order + 1} を削除`} aria-disabled={Boolean(reason)}
+      aria-describedby={reasonId}
+      title={reason ?? "空トラックを削除し、残るトラック番号を詰め直します"}
+      onPointerDown={e => e.stopPropagation()}
+      onClick={e => { e.stopPropagation(); onDelete(); }}
+      onKeyDown={e => { if (e.key === " " || e.key === "Enter") e.stopPropagation(); }}>
+      削除
+    </button>
+    <span className="track-delete-reason" id={reasonId}>
+      {reason ?? "空トラックを削除し、残るトラック番号を詰め直します"}
+    </span>
+  </span>;
+}
+
 
 export function TimelineToolbar({ editor }: { editor: EditorStore }) {
   const {
@@ -37,7 +63,7 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
   return (
     <div className="timeline-toolbar">
       <div className="timeline-toolbar-left">
-        <button type="button" onClick={addTrack} disabled={Boolean(busy)} title="トラック追加 (Ctrl+T)">
+        <button type="button" data-add-track onClick={addTrack} disabled={Boolean(busy)} title="トラック追加 (Ctrl+T)">
           +
         </button>
         <button type="button" onClick={splitAtPlayhead} disabled={Boolean(busy)} title="分割 (Ctrl+X)">
@@ -190,6 +216,38 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
   const rulerWidth = secToPx(project.compositionDurationSec + 2, pps);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const trackRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const timelineRef = useRef<HTMLElement | null>(null);
+  const deleteButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const pendingDeletionRef = useRef<{ before: EditorProject; expected: EditorProject; neighborId?: string; message: string } | null>(null);
+  const [deletionNotice, setDeletionNotice] = useState<{ project: EditorProject; message: string } | null>(null);
+  function trackDeletionReason(trackId: string): string | undefined {
+    if (editor.busy || editor.persistence.locked) return "処理中です";
+    if (project.clips.some(c => c.trackId === trackId)) return "クリップがあるトラックは削除できません";
+    if (project.tracks.length <= 1) return "最後のトラックは削除できません";
+  }
+  function requestTrackDeletion(trackId: string) {
+    if (trackDeletionReason(trackId) || pendingDeletionRef.current) return;
+    const index = tracks.findIndex(t => t.id === trackId);
+    if (index < 0) return;
+    const expected = editor.deleteEmptyTrack(trackId);
+    if (!expected) return;
+    pendingDeletionRef.current = { before: project, expected,
+      neighborId: tracks[index + 1]?.id ?? tracks[index - 1]?.id,
+      message: `空トラックT${tracks[index]!.order + 1}を削除しました` };
+  }
+  useLayoutEffect(() => {
+    const pending = pendingDeletionRef.current;
+    if (!pending) return;
+    if (project === pending.expected) {
+      pendingDeletionRef.current = null;
+      setDeletionNotice({ project, message: pending.message });
+      const neighbor = pending.neighborId ? deleteButtonsRef.current.get(pending.neighborId) : undefined;
+      (neighbor ?? timelineRef.current?.querySelector<HTMLButtonElement>("[data-add-track]"))?.focus();
+    } else if (project !== pending.before || editor.busy || editor.persistence.locked) {
+      pendingDeletionRef.current = null;
+    }
+  }, [project, editor.busy, editor.persistence.locked]);
+
   const [drag, setDrag] = useState<DragState | null>(null);
   const [rawDragPreview, setRawDragPreview] = useState<DragPreview | null>(null);
   const [altPressed, setAltPressed] = useState(false);
@@ -413,7 +471,8 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
   }
 
   return (
-    <section className="multi-track-timeline panel">
+    <section className="multi-track-timeline panel" ref={timelineRef}>
+      <div className="track-delete-status" role="status" aria-live="polite">{deletionNotice?.project === project ? deletionNotice.message : ""}</div>
       <TimelineToolbar editor={editor} />
       <div
         className="timeline-scroll"
@@ -455,7 +514,9 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => onTrackDrop(e, track.id)}
           >
-            <span className="timeline-track-label">T{track.order + 1}</span>
+            <TrackDeletionControl order={track.order} reason={trackDeletionReason(track.id)}
+              buttonRef={el => { if (el) deleteButtonsRef.current.set(track.id, el); else deleteButtonsRef.current.delete(track.id); }}
+              onDelete={() => requestTrackDeletion(track.id)} />
             {project.clips
               .filter((c) => {
                 const st = clipDisplayState(c.id, c);

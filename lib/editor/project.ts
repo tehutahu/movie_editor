@@ -103,3 +103,15 @@ export function defaultTransformForTrack(trackOrder: number, maxOrder: number): 
   const scale = Math.max(0.55, 1 - depth * 0.12);
   return { x: 0.5, y: 0.5, scale };
 }
+
+/** Remove one empty track and compress distinct order values, preserving ties
+ * and the array order used by the existing compositor/audio stable sorts. */
+export function deleteEmptyTrackFromProject(project: EditorProject, trackId: string): EditorProject | null {
+  if (project.tracks.length < 2 || !project.tracks.some(t => t.id === trackId) ||
+      project.clips.some(c => c.trackId === trackId)) return null;
+  const remaining = project.tracks.filter(t => t.id !== trackId);
+  if (remaining.length !== project.tracks.length - 1) return null;
+  const orders = [...new Set(remaining.map(t => t.order))].sort((a, b) => a - b);
+  const ranks = new Map(orders.map((order, i) => [order, i]));
+  return { ...project, tracks: remaining.map(t => ({ ...t, order: ranks.get(t.order)! })) };
+}
