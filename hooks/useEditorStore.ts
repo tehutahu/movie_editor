@@ -1,5 +1,6 @@
 "use client";
 
+import { useRestoreInputAudio } from "@/hooks/useRestoreInputAudio";
 import { applyExactSeek } from "@/lib/editor/exactSeek";
 import {
   useCallback,
@@ -95,7 +96,13 @@ export function useEditorStore() {
     clientId: string; epoch: number; assetId: string; jobId: string; clipId: string;
   }[]>([]);
   const [speedFactor, setSpeedFactor] = useState("2");
-  const [sampleRateHz, setSampleRateHz] = useState("44100");
+  const [sampleRateHz, setSampleRateHzState] = useState("44100");
+  const restoreSubmissionRef = useRef(false);
+  const speedFactorRef = useRef(speedFactor);
+  speedFactorRef.current = speedFactor;
+  const sampleRateRef = useRef(sampleRateHz);
+  sampleRateRef.current = sampleRateHz;
+  const copySampleRate = useCallback((value: string) => { sampleRateRef.current = value; setSampleRateHzState(value); }, []);
   const [timelineZoom, setTimelineZoom] = useState(1);
   const [clipExportBusyId, setClipExportBusyId] = useState<string | null>(null);
 
@@ -150,6 +157,9 @@ export function useEditorStore() {
 
   const mutationLockedRef = useRef(false);
   mutationLockedRef.current = Boolean(busy) || persistence.locked;
+  const getRestoreInputState = useCallback(() => ({ project: latestProjectRef.current, epoch: projectEpochRef.current, blocked: mutationLockedRef.current || restoreSubmissionRef.current }), []);
+  const restoreInputAudio = useRestoreInputAudio(project, projectEpoch, Boolean(busy) || persistence.locked, getRestoreInputState, copySampleRate);
+  const setSampleRateHz = (value: string) => { if (mutationLockedRef.current || restoreSubmissionRef.current) return; restoreInputAudio.manualEdit(); copySampleRate(value); };
   // Record success only after the history commit adopted this exact result.
   // Updaters stay pure, and a stale result never creates a completed step.
   useEffect(() => {
@@ -605,8 +615,10 @@ export function useEditorStore() {
   }, [exportSelectedClips]);
 
   const restoreSpeedForSelected = useCallback(async () => {
+    if (mutationLockedRef.current || restoreSubmissionRef.current) return;
     setError(null);
-    const cur = getCurrentProject(history);
+    const snapshotHistory = latestHistoryRef.current;
+    const cur = getCurrentProject(snapshotHistory);
     const clipId = cur.selectedClipIds[0];
     if (!clipId) {
       setError("速度復元する動画クリップを選択してください。");
@@ -619,8 +631,8 @@ export function useEditorStore() {
       return;
     }
 
-    const factor = Number(speedFactor);
-    const sr = Number(sampleRateHz);
+    const factor = Number(speedFactorRef.current);
+    const sr = Number(sampleRateRef.current);
     if (!(factor > 0) || !Number.isFinite(factor)) {
       setError("速度係数が不正です。");
       return;
@@ -635,10 +647,11 @@ export function useEditorStore() {
     const sourceStillCurrent = (p: EditorProject) =>
       projectEpochRef.current === epoch && matchesRestoreSource(p, source);
 
+    restoreSubmissionRef.current = true;
     setBusy("速度復元中…");
     setJobPhase("restore:queued");
     try {
-      await protectReferences(storageReferences(history));
+      await protectReferences(storageReferences(snapshotHistory));
       const res = await fetch("/api/jobs/restore", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -694,6 +707,7 @@ export function useEditorStore() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      restoreSubmissionRef.current = false;
       setBusy(null);
       setLiveJob(null);
       setJobPhase(null);
@@ -844,6 +858,7 @@ export function useEditorStore() {
     setSpeedFactor,
     sampleRateHz,
     setSampleRateHz,
+    restoreInputAudio,
     timelineZoom,
     setTimelineZoom,
     clipExportBusyId,
