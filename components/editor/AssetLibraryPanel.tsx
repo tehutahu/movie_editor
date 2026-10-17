@@ -1,12 +1,17 @@
 "use client";
 
+import { useRef } from "react";
 import type { EditorStore } from "@/hooks/useEditorStore";
+import { assetAdditionTrack } from "@/lib/editor/addAssetAtPlayhead";
 import type { Asset } from "@/lib/editor/types";
 
 export function AssetLibraryPanel({ editor }: { editor: EditorStore }) {
-  const { project, uploadAssets, busy } = editor;
+  const { project, uploadAssets, busy, persistence, addAssetAtPlayhead, assetAdditionStatus } = editor;
+  const target = assetAdditionTrack(project);
+  const dragFromAction = useRef(false);
 
   function onDragStart(e: React.DragEvent, asset: Asset) {
+    if (dragFromAction.current) { e.preventDefault(); return; }
     e.dataTransfer.setData("application/x-asset-id", asset.id);
     e.dataTransfer.effectAllowed = "copy";
   }
@@ -28,6 +33,8 @@ export function AssetLibraryPanel({ editor }: { editor: EditorStore }) {
         />
         追加
       </label>
+      {!target && <p className="muted">＋でトラックを追加してください。</p>}
+      <p className="asset-add-status muted" role="status">{assetAdditionStatus}</p>
       <div className="asset-grid">
         {project.assets.length === 0 ? (
           <p className="muted">動画・画像をアップロードしてください。</p>
@@ -37,6 +44,7 @@ export function AssetLibraryPanel({ editor }: { editor: EditorStore }) {
               key={asset.id}
               className="asset-card"
               draggable
+              onPointerDown={() => { dragFromAction.current = false; }}
               onDragStart={(e) => onDragStart(e, asset)}
               title={asset.displayName}
             >
@@ -49,6 +57,21 @@ export function AssetLibraryPanel({ editor }: { editor: EditorStore }) {
               </div>
               <span className="asset-name">{asset.displayName}</span>
               <span className="asset-kind muted">{asset.kind}</span>
+              <button
+                type="button"
+                className="asset-add-button"
+                disabled={!target || Boolean(busy) || persistence.locked}
+                aria-label={`${asset.displayName}を${target ? `T${target.order + 1}の` : ""}再生位置へ追加`}
+                onClick={() => addAssetAtPlayhead(asset.id)}
+                onKeyDown={(event) => {
+                  if (event.key === " ") event.stopPropagation();
+                }}
+                onPointerDown={(event) => { dragFromAction.current = true; event.stopPropagation(); }}
+                onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                draggable={false}
+              >
+                {target ? `T${target.order + 1}の再生位置へ追加` : "再生位置へ追加"}
+              </button>
             </div>
           ))
         )}

@@ -23,6 +23,7 @@ import {
   updateEditorView,
   type CommandHistory,
 } from "@/lib/editor/commandHistory";
+import { newId } from "@/lib/newId";
 import type { EditorCommand } from "@/lib/editor/commands";
 import { applyCommand } from "@/lib/editor/commands";
 import {
@@ -120,6 +121,30 @@ export function useEditorStore() {
   const persistence = useProjectPersistence({ history, setHistory, sessionId, busy, setBusy, setError,
     onLoaded: () => { projectEpochRef.current += 1; audioVideoRef.current?.pause(); setPendingRestores([]); setAppliedJobSteps([]); setLiveJob(null); setJobPhase(null); setProjectEpoch(v => v + 1); },
   });
+  const assetAddBlockedRef = useRef(false);
+  assetAddBlockedRef.current = Boolean(busy) || persistence.locked;
+  const [pendingAssetAddition, setPendingAssetAddition] = useState<{ clipId: string; epoch: number } | null>(null);
+  const [assetAdditionNotice, setAssetAdditionNotice] = useState<{ clipId: string; trackId: string; startSec: number; epoch: number; text: string } | null>(null);
+  useEffect(() => {
+    if (!pendingAssetAddition) return;
+    if (pendingAssetAddition.epoch === projectEpochRef.current) {
+      const clip = project.clips.find((candidate) => candidate.id === pendingAssetAddition.clipId);
+      const track = project.tracks.find((candidate) => candidate.id === clip?.trackId);
+      if (clip && track) setAssetAdditionNotice({ clipId: clip.id, trackId: track.id, startSec: clip.timelineStartSec,
+        epoch: pendingAssetAddition.epoch, text: `T${track.order + 1}の${Number(clip.timelineStartSec.toFixed(3))}秒へ追加しました。` });
+    }
+    setPendingAssetAddition(null);
+  }, [pendingAssetAddition, project]);
+  const addAssetAtPlayhead = useCallback((assetId: string) => {
+    if (assetAddBlockedRef.current) return;
+    const clipId = newId();
+    setAssetAdditionNotice(null);
+    setPendingAssetAddition({ clipId, epoch: projectEpochRef.current });
+    setHistory((current) => {
+      if (assetAddBlockedRef.current) return current;
+      return dispatchCommand(current, { type: "addAssetAtPlayhead", assetId, clipId })?.history ?? current;
+    });
+  }, []);
   // Record success only after the history commit adopted this exact result.
   // Updaters stay pure, and a stale result never creates a completed step.
   useEffect(() => {
@@ -791,6 +816,10 @@ export function useEditorStore() {
     canRedoEdit: canRedo(history),
     uploadAssets,
     addClipFromAsset,
+    addAssetAtPlayhead,
+    assetAdditionStatus: assetAdditionNotice?.epoch === projectEpoch && project.clips.some(clip =>
+      clip.id === assetAdditionNotice.clipId && clip.trackId === assetAdditionNotice.trackId &&
+      clip.timelineStartSec === assetAdditionNotice.startSec) ? assetAdditionNotice.text : "",
     addTrack,
     splitAtPlayhead,
     mergeSelected,

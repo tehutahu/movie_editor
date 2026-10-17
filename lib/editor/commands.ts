@@ -1,3 +1,4 @@
+import { addAssetAtPlayhead } from "@/lib/editor/addAssetAtPlayhead";
 import { applySpeedRestoreToProject } from "@/lib/editor/applySpeedRestore";
 import type { Clip, ClipLayoutMode, ClipTransform, EditorProject } from "@/lib/editor/types";
 import {
@@ -21,6 +22,7 @@ export type EditorCommand =
   | { type: "layoutMode"; clipIds: string[]; layoutMode: ClipLayoutMode }
   | { type: "delete"; clipIds: string[] }
   | { type: "addClip"; clip: Clip }
+  | { type: "addAssetAtPlayhead"; assetId: string; clipId: string }
   | { type: "addTrack" }
   | { type: "duplicate"; clipIds: string[] }
   | {
@@ -57,6 +59,8 @@ export function applyCommand(
     }
     case "delete":
       return deleteClips(project, command.clipIds);
+    case "addAssetAtPlayhead":
+      return addAssetAtPlayhead(project, command.assetId, command.clipId);
     case "addClip":
       return addClipToProject(project, command.clip);
     case "addTrack":

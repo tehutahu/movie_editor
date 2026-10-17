@@ -999,3 +999,21 @@ button.primary {
 .project-revision { display: flex; align-items: center; flex-wrap: wrap; }
 .project-dialog { position: fixed; z-index: 100; top: 25%; left: 10%; width: 80%; max-height: 65vh; overflow: auto; background: #1e2230; color: white; padding: 24px; border: 2px solid #7893eb; border-radius: 12px; box-shadow: 0 0 0 100vmax #0009; }
 .project-dialog label { display: block; margin: 12px 0; overflow-wrap: anywhere; }
+
+.asset-add-button {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 4px;
+  font-size: 0.75rem;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.asset-add-status {
+  font-size: 0.75rem;
+}
+
+.asset-add-status:empty {
+  display: none;
+}
