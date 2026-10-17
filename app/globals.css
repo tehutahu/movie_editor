@@ -1062,3 +1062,14 @@ button.primary {
 }
 .track-delete-status:empty { display: none; }
 .track-delete-status { padding: 4px 8px; font-size: 0.8rem; color: #c6d2ed; }
+
+.trim-start-action { position: relative; }
+.trim-start-action button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.trim-start-reason {
+  pointer-events: none;
+  display: none; position: absolute; z-index: 30; top: 100%; left: 0;
+  width: 260px; padding: 6px 8px; background: #20242c; color: #f5f5f5;
+  border: 1px solid #596273; border-radius: 4px; font-size: 12px;
+}
+.trim-start-action:hover .trim-start-reason,
+.trim-start-action:focus-within .trim-start-reason { display: block; }

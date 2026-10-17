@@ -1,5 +1,6 @@
 "use client";
 
+import { trimStartReason, trimStartSnapshot } from "@/lib/editor/trimClipStart";
 import type { EditorProject } from "@/lib/editor/types";
 import type { EditorStore } from "@/hooks/useEditorStore";
 import { resolvePlayheadSnappedStart } from "@/lib/editor/playheadSnap";
@@ -60,6 +61,10 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
     setSampleRateHz,
   } = editor;
 
+  const trimReasonId = useId();
+  const trimSnapshot = trimStartSnapshot(project, editor.projectEpoch);
+  const trimReason = busy || editor.persistence.locked ? "処理が終わってから操作してください。" : trimStartReason(project);
+
   return (
     <div className="timeline-toolbar">
       <div className="timeline-toolbar-left">
@@ -69,6 +74,16 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
         <button type="button" onClick={splitAtPlayhead} disabled={Boolean(busy)} title="分割 (Ctrl+X)">
           ✂
         </button>
+        <span className="trim-start-action">
+          <button type="button" data-trim-start aria-disabled={Boolean(trimReason)} aria-describedby={trimReasonId}
+            title={trimReason ?? "先頭を再生位置まで短縮します。末尾と素材参照は維持します。"}
+            onPointerDown={e => e.stopPropagation()}
+            onKeyDown={e => { if (e.key === " " || e.key === "Enter") e.stopPropagation(); }}
+            onClick={() => editor.trimSelectedStartAtPlayhead(trimSnapshot)}>
+            先頭を再生位置まで短縮
+          </button>
+          <span className="trim-start-reason" id={trimReasonId}>{trimReason ?? "末尾を維持し、先頭だけ短縮します。"}</span>
+        </span>
         <button type="button" onClick={undoEdit} disabled={!canUndoEdit} title="Undo (Ctrl+Z)">
           ↶
         </button>
