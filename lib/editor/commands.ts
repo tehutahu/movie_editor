@@ -1,3 +1,4 @@
+import { setClipAudioGain } from "@/lib/editor/clipAudio";
 import { moveClips } from "@/lib/editor/moveClips";
 import { trimClipStart, trimStartReason } from "@/lib/editor/trimClipStart";
 import { addAssetAtPlayhead } from "@/lib/editor/addAssetAtPlayhead";
@@ -19,6 +20,7 @@ export type EditorCommand =
   | { type: "trimStart"; clipId: string; atSec: number }
   | { type: "split"; clipId: string; atSec: number }
   | { type: "merge"; clipIds: string[] }
+  | { type: "audioGain"; clipIds: string[]; gain: number }
   | { type: "moveMany"; clipIds: string[]; deltaSec: number }
   | { type: "move"; clipId: string; newStartSec: number; newTrackId?: string }
   | { type: "resize"; clipId: string; newDurationSec: number }
@@ -54,6 +56,8 @@ export function applyCommand(
       return splitClipAtPlayhead(project, command.clipId, command.atSec);
     case "merge":
       return mergeClips(project, command.clipIds);
+    case "audioGain":
+      return setClipAudioGain(project, command.clipIds, command.gain);
     case "moveMany":
       return moveClips(project, command.clipIds, command.deltaSec);
     case "move":

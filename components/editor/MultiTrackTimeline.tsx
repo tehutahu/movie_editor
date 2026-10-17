@@ -1,4 +1,5 @@
 "use client";
+import { ClipAudioControl } from "./ClipAudioControl";
 import { RestoreInputAudio, RestoreInputAudioSummary } from "./RestoreInputAudio";
 
 import { groupMoveSnapshot, matchesGroupMoveSnapshot, resolveGroupMove, type GroupMoveSnapshot, type GroupMovePlan } from "@/lib/editor/moveClips";
@@ -536,6 +537,7 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
   return (
     <section className="multi-track-timeline panel" ref={timelineRef}>
       <div className="track-delete-status" role="status" aria-live="polite">{deletionNotice?.project === project ? deletionNotice.message : ""}</div>
+      <ClipAudioControl editor={editor} />
       <TimelineToolbar editor={editor} />
       <div className="group-move-status" role="status" aria-live="polite">{groupPlan ? groupPlan.reason ?? "選択中のクリップを同じ時間差でまとめて移動します（トラックは変わりません）" : (groupNotice?.project === project && groupNotice.epoch === editor.projectEpoch ? groupNotice.text : "") || (project.selectedClipIds.length >= 2 ? "選択済みクリップをドラッグすると、まとめて横に移動できます" : "")}</div>
       <div

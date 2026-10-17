@@ -24,7 +24,7 @@ export type MediaReference = {
 };
 export type ProjectDocument = {
   format: "movie-editor-project";
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   project: Pick<
     EditorProject,
     | "tracks"
@@ -67,7 +67,7 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
   )
     throw new Error("JSON サイズが上限を超えています。");
   const doc = record(raw);
-  if (doc.format !== "movie-editor-project" || (doc.version !== 1 && doc.version !== 2))
+  if (doc.format !== "movie-editor-project" || (doc.version !== 1 && doc.version !== 2 && doc.version !== 3))
     throw new Error("未対応のプロジェクト形式・version です。");
   const p = record(doc.project);
   const duration = assertStrictFiniteNumber(
@@ -145,6 +145,7 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
   const clips = array(p.clips, 100).map((c, i) => {
     if (doc.version === 1 && Object.hasOwn(record(c), "layoutMode"))
       throw new Error("v1 に配置モードは指定できません。");
+    if (doc.version !== 3 && Object.hasOwn(record(c), "audioGain")) throw new Error("v1/v2 に音量は指定できません。");
     return parseClip(
       c,
       i,
@@ -169,7 +170,7 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
     }
   return {
     format: "movie-editor-project",
-    version: doc.version as 1 | 2,
+    version: doc.version as 1 | 2 | 3,
     project: {
       assets,
       tracks,
@@ -185,12 +186,12 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
 export function projectDocumentDraft(project: EditorProject): ProjectDocument {
   return {
     format: "movie-editor-project",
-    version: project.clips.some(c => c.layoutMode === "contain") ? 2 : 1,
+    version: project.clips.some(c => (c.audioGain ?? 1) !== 1) ? 3 : project.clips.some(c => c.layoutMode === "contain") ? 2 : 1,
     project: {
       tracks: structuredClone(project.tracks),
       clips: project.clips.map(c => {
-        const { layoutMode, ...clip } = structuredClone(c);
-        return layoutMode === "contain" ? { ...clip, layoutMode } : clip;
+        const { layoutMode, audioGain, ...clip } = structuredClone(c);
+        return { ...clip, ...(layoutMode === "contain" ? { layoutMode } : {}), ...(audioGain !== undefined && audioGain !== 1 ? { audioGain } : {}) };
       }),
       compositionWidth: project.compositionWidth,
       compositionHeight: project.compositionHeight,

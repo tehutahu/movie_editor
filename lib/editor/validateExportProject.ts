@@ -1,3 +1,4 @@
+import { validAudioGain } from "./clipAudio";
 import {
   DEFAULT_COMPOSITION_HEIGHT,
   DEFAULT_COMPOSITION_WIDTH,
@@ -153,6 +154,7 @@ export function parseClip(
   if (o.layoutMode !== undefined && o.layoutMode !== "stretch" && o.layoutMode !== "contain") {
     throw new Error("配置モードが不正です。");
   }
+  if (o.audioGain !== undefined && !validAudioGain(o.audioGain)) throw new Error("音量は0〜1で指定してください。");
   const trackId = assertStorageId(`clips[${index}].trackId`, String(o.trackId ?? ""));
   if (!trackIds.has(trackId)) {
     throw new Error(`clips[${index}].trackId が tracks に存在しません。`);
@@ -193,6 +195,7 @@ export function parseClip(
     parts,
     transform: parseTransform(o.transform, `clips[${index}].transform`),
     ...(o.layoutMode === undefined ? {} : { layoutMode: o.layoutMode as Clip["layoutMode"] }),
+    ...(o.audioGain === undefined ? {} : { audioGain: o.audioGain as number }),
   };
 }
 

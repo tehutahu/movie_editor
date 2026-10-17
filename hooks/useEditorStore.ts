@@ -1,6 +1,7 @@
 "use client";
 
 import { useRestoreInputAudio } from "@/hooks/useRestoreInputAudio";
+import { matchesClipAudioSnapshot, mergedAudioGain, type ClipAudioSnapshot } from "@/lib/editor/clipAudio";
 import { matchesGroupMoveSnapshot, type GroupMoveSnapshot } from "@/lib/editor/moveClips";
 import { applyExactSeek } from "@/lib/editor/exactSeek";
 import {
@@ -429,6 +430,11 @@ export function useEditorStore() {
       setError("結合するクリップを2つ以上選択してください（Ctrl+クリック）。");
       return;
     }
+    const selectedClips = cur.clips.filter(c => cur.selectedClipIds.includes(c.id));
+    if (mergedAudioGain(cur, selectedClips) === null) {
+      setError("動画を含むクリップの音量を揃えてから結合してください。");
+      return;
+    }
     setError(null);
     setHistory((h) => {
       const result = dispatchCommand(h, { type: "merge", clipIds: cur.selectedClipIds });
@@ -476,6 +482,15 @@ export function useEditorStore() {
       const current = getCurrentProject(h);
       if (areEditorShortcutsBlocked() || !matchesGroupMoveSnapshot(current, projectEpochRef.current, timelineZoomRef.current, snapshot)) return h;
       return dispatchCommand(h, { type: "moveMany", clipIds: snapshot.clipIds, deltaSec })?.history ?? h;
+    });
+  }, [areEditorShortcutsBlocked]);
+
+  const setSelectedAudioGain = useCallback((snapshot: ClipAudioSnapshot, gain: number) => {
+    if (areEditorShortcutsBlocked()) return;
+    setHistory(h => {
+      const current = getCurrentProject(h);
+      if (areEditorShortcutsBlocked() || !matchesClipAudioSnapshot(current, projectEpochRef.current, snapshot)) return h;
+      return dispatchCommand(h, { type: "audioGain", clipIds: snapshot.clipIds, gain })?.history ?? h;
     });
   }, [areEditorShortcutsBlocked]);
 
@@ -911,6 +926,7 @@ export function useEditorStore() {
     duplicateSelected,
     moveSelectedClip,
     moveSelectedClips,
+    setSelectedAudioGain,
     resizeClipDuration,
     updateClipTransform,
     fitSelectedClipsToCanvas,

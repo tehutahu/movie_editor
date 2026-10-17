@@ -21,11 +21,12 @@ export function selectedClipExportRequest(project: EditorProject, clip: Clip) {
       startSec: part.sourceInSec, endSec: part.sourceOutSec, exportBaseName,
     } };
   }
+  const { audioGain: _gain, ...sourceClip } = structuredClone(clip);
   const size = compositionSizeFromAsset(first.width ?? project.compositionWidth, first.height ?? project.compositionHeight);
   return { url: "/api/jobs/export-composition", body: {
     assets: [...new Map(assets.map((a) => [a.id, a])).values()],
     tracks: project.tracks.filter((t) => t.id === clip.trackId),
-    clips: [{ ...structuredClone(clip), timelineStartSec: 0, transform: fitClipTransformToCanvas() }],
+    clips: [{ ...sourceClip, timelineStartSec: 0, transform: fitClipTransformToCanvas() }],
     compositionDurationSec: clip.durationSec,
     compositionWidth: size.width, compositionHeight: size.height, exportBaseName,
   } };

@@ -1,5 +1,6 @@
 "use client";
 
+import { clipAudioGain } from "@/lib/editor/clipAudio";
 import type { EditorStore } from "@/hooks/useEditorStore";
 import {
   BASE_DRAW_HEIGHT_RATIO,
@@ -28,6 +29,7 @@ const EDITOR_HELP_ITEMS = [
   { keys: "Ctrl/Cmd+クリック", desc: "複数選択の追加・解除" },
   { keys: "選択済クリップを通常ドラッグ", desc: "まとめて横移動（元トラック・間隔を維持、重なれば全体を取消）" },
   { keys: "Alt（移動中）", desc: "再生位置への吸着を一時解除" },
+  { keys: "音量 % → 適用 / Enter", desc: "選択動画の音量を0〜100%へ設定（素材DLは元音声）" },
   { keys: "Delete", desc: "削除" },
   { keys: "Ctrl+D", desc: "複製" },
   { keys: "Ctrl+X", desc: "分割" },
@@ -453,6 +455,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
       video.pause();
       return;
     }
+    video.volume = clipAudioGain(audio.clip);
     const absUrl = new URL(audio.asset.streamUrl, window.location.origin).href;
     if (video.src !== absUrl) video.src = audio.asset.streamUrl;
     syncVideoTime(video, audio.sourceTimeSec, isPlayingRef.current);

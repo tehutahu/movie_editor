@@ -1,3 +1,4 @@
+import { audioGainFilter } from "@/lib/editor/clipAudio";
 /** Opt-in layout renderer. All-stretch compositions use the unchanged legacy renderer. */
 import path from "node:path";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
@@ -126,7 +127,7 @@ export async function exportLayoutCompositionToFile(params: { project: EditorPro
       // Existing stretch outputs may have no audio (single silent video).
       const hasAudio = p.matte ? p.audio : p.audio && (await probeVideo(p.file)).hasAudio;
       if (await hasAudio) {
-        filters.push(`[${j}:a:0]adelay=${Math.round(p.clip.timelineStartSec * 1000)}|${Math.round(p.clip.timelineStartSec * 1000)}[a${i}]`);
+        filters.push(`[${j}:a:0]${audioGainFilter(p.clip)}adelay=${Math.round(p.clip.timelineStartSec * 1000)}|${Math.round(p.clip.timelineStartSec * 1000)}[a${i}]`);
         audioLabels.push(`[a${i}]`);
       }
     }
