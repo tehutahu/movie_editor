@@ -124,13 +124,13 @@ export function useEditorStore() {
   const assetAddBlockedRef = useRef(false);
   assetAddBlockedRef.current = Boolean(busy) || persistence.locked;
   const [pendingAssetAddition, setPendingAssetAddition] = useState<{ clipId: string; epoch: number } | null>(null);
-  const [assetAdditionNotice, setAssetAdditionNotice] = useState<{ clipId: string; trackId: string; startSec: number; epoch: number; text: string } | null>(null);
+  const [assetAdditionNotice, setAssetAdditionNotice] = useState<{ clipId: string; trackId: string; trackOrder: number; startSec: number; epoch: number; text: string } | null>(null);
   useEffect(() => {
     if (!pendingAssetAddition) return;
     if (pendingAssetAddition.epoch === projectEpochRef.current) {
       const clip = project.clips.find((candidate) => candidate.id === pendingAssetAddition.clipId);
       const track = project.tracks.find((candidate) => candidate.id === clip?.trackId);
-      if (clip && track) setAssetAdditionNotice({ clipId: clip.id, trackId: track.id, startSec: clip.timelineStartSec,
+      if (clip && track) setAssetAdditionNotice({ clipId: clip.id, trackId: track.id, trackOrder: track.order, startSec: clip.timelineStartSec,
         epoch: pendingAssetAddition.epoch, text: `T${track.order + 1}の${Number(clip.timelineStartSec.toFixed(3))}秒へ追加しました。` });
     }
     setPendingAssetAddition(null);
@@ -145,6 +145,9 @@ export function useEditorStore() {
       return dispatchCommand(current, { type: "addAssetAtPlayhead", assetId, clipId })?.history ?? current;
     });
   }, []);
+
+  const mutationLockedRef = useRef(false);
+  mutationLockedRef.current = Boolean(busy) || persistence.locked;
   // Record success only after the history commit adopted this exact result.
   // Updaters stay pure, and a stale result never creates a completed step.
   useEffect(() => {
@@ -348,6 +351,17 @@ export function useEditorStore() {
   const addTrack = useCallback(() => {
     dispatch({ type: "addTrack" });
   }, [dispatch]);
+
+  const deleteEmptyTrack = useCallback((trackId: string): EditorProject | null => {
+    if (mutationLockedRef.current) return null;
+    const snapshot = latestHistoryRef.current;
+    const result = dispatchCommand(snapshot, { type: "deleteEmptyTrack", trackId });
+    if (!result) return null;
+    // Recheck the actual queued history: intervening edits/loads cannot adopt
+    // a deletion computed for an obsolete project or reuse a T-number as ID.
+    setHistory(h => h === snapshot && !mutationLockedRef.current ? result.history : h);
+    return result.project;
+  }, []);
 
   const splitAtPlayhead = useCallback(() => {
     const cur = getCurrentProject(history);
@@ -817,10 +831,12 @@ export function useEditorStore() {
     uploadAssets,
     addClipFromAsset,
     addAssetAtPlayhead,
-    assetAdditionStatus: assetAdditionNotice?.epoch === projectEpoch && project.clips.some(clip =>
+    assetAdditionStatus: assetAdditionNotice?.epoch === projectEpoch && project.tracks.some(track =>
+      track.id === assetAdditionNotice.trackId && track.order === assetAdditionNotice.trackOrder) && project.clips.some(clip =>
       clip.id === assetAdditionNotice.clipId && clip.trackId === assetAdditionNotice.trackId &&
       clip.timelineStartSec === assetAdditionNotice.startSec) ? assetAdditionNotice.text : "",
     addTrack,
+    deleteEmptyTrack,
     splitAtPlayhead,
     mergeSelected,
     deleteSelected,
