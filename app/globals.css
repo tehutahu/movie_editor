@@ -1017,3 +1017,48 @@ button.primary {
 .asset-add-status:empty {
   display: none;
 }
+
+/* Track controls remain inside the existing 48px label/time origin. */
+.timeline-track-label {
+  width: 48px;
+  box-sizing: border-box;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2px;
+  gap: 3px;
+}
+.track-delete-button {
+  pointer-events: auto;
+  width: 40px;
+  min-height: 24px;
+  padding: 2px;
+  font-size: 0.65rem;
+}
+.track-delete-button[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.track-delete-button:focus-visible { outline: 2px solid #93b4ff; outline-offset: 1px; }
+.track-delete-reason {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  pointer-events: none;
+}
+.timeline-track-label:focus-within .track-delete-reason {
+  left: 48px;
+  top: 4px;
+  width: 260px;
+  height: auto;
+  clip-path: none;
+  padding: 6px;
+  border: 1px solid #53637b;
+  border-radius: 4px;
+  background: #151c2a;
+  color: #e5eaf5;
+  white-space: normal;
+  font-size: 0.75rem;
+  text-align: left;
+  box-sizing: border-box;
+}
+.track-delete-status:empty { display: none; }
+.track-delete-status { padding: 4px 8px; font-size: 0.8rem; color: #c6d2ed; }

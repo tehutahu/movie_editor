@@ -11,7 +11,7 @@ import {
   setClipTransform,
   splitClipAtPlayhead,
 } from "@/lib/editor/clipOps";
-import { addTrackToProject } from "@/lib/editor/project";
+import { addTrackToProject, deleteEmptyTrackFromProject } from "@/lib/editor/project";
 
 export type EditorCommand =
   | { type: "split"; clipId: string; atSec: number }
@@ -24,6 +24,7 @@ export type EditorCommand =
   | { type: "addClip"; clip: Clip }
   | { type: "addAssetAtPlayhead"; assetId: string; clipId: string }
   | { type: "addTrack" }
+  | { type: "deleteEmptyTrack"; trackId: string }
   | { type: "duplicate"; clipIds: string[] }
   | {
       type: "restoreSpeed";
@@ -63,6 +64,8 @@ export function applyCommand(
       return addAssetAtPlayhead(project, command.assetId, command.clipId);
     case "addClip":
       return addClipToProject(project, command.clip);
+    case "deleteEmptyTrack":
+      return deleteEmptyTrackFromProject(project, command.trackId);
     case "addTrack":
       return addTrackToProject(project);
     case "duplicate":
