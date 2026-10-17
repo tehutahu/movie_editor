@@ -1,4 +1,4 @@
-/* global document */
+/* global document, window */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import console from 'node:console';
@@ -18,6 +18,22 @@ let page;
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(baseURL);
+    await page.evaluate(() => {
+        window.__historyPhysicalKeys = [];
+        window.addEventListener('keydown', e => {
+            if (e.code === 'KeyZ') window.__historyPhysicalKeys.push({ key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, trusted: e.isTrusted });
+        }, true);
+    });
+    const physicalZ = async (modifier, { shift = false, uppercase = false } = {}) => {
+        await page.keyboard.down(modifier);
+        if (shift) await page.keyboard.down('Shift');
+        try { await page.keyboard.press(uppercase ? 'Z' : 'KeyZ'); }
+        finally { if (shift) await page.keyboard.up('Shift'); await page.keyboard.up(modifier); }
+        const keys = await page.evaluate(() => window.__historyPhysicalKeys);
+        const event = keys.at(-1);
+        assert.deepEqual(event, { key: shift || uppercase ? 'Z' : 'z', code: 'KeyZ', ctrl: modifier === 'Control', meta: modifier === 'Meta', shift, trusted: true });
+        fs.writeFileSync(evidence + '/physical-keys.json', JSON.stringify(keys, null, 2));
+    };
     await page.getByRole('heading', { name: /マルチトラック動画エディタ/ }).waitFor();
     check('editor header', true);
     check('preview canvas', await page.locator('canvas').count() === 1);
@@ -104,6 +120,22 @@ let page;
     check('split remains redoable after seek/select', await redo.isEnabled());
     await page.keyboard.press('Control+Shift+z');
     check('keyboard Redo restores split', await page.locator('.timeline-clip').count() === 2);
+    for (const modifier of ['Control', 'Meta']) {
+        await physicalZ(modifier);
+        check(`${modifier} physical lowercase Undo restores one clip`, await page.locator('.timeline-clip').count() === 1 && await redo.isEnabled());
+        await physicalZ(modifier, { shift: true });
+        check(`${modifier}+Shift+KeyZ produces uppercase Z and redoes the split`, await page.locator('.timeline-clip').count() === 2 && await redo.isDisabled());
+        await physicalZ(modifier, { uppercase: true });
+        check(`${modifier} uppercase Z without Shift still performs Undo`, await page.locator('.timeline-clip').count() === 1 && await redo.isEnabled());
+        await page.keyboard.press(`${modifier}+Shift+z`);
+        const legacy = await page.evaluate(() => window.__historyPhysicalKeys.at(-1));
+        assert.equal(legacy.key, 'z'); assert.equal(legacy.shift, true);
+        check(`${modifier} lowercase shifted legacy Redo remains supported`, await page.locator('.timeline-clip').count() === 2 && await redo.isDisabled());
+        const before = await page.locator('.timeline-clip').evaluateAll(es => es.map(e => e.getAttribute('style')));
+        await physicalZ(modifier, { shift: true });
+        assert.deepEqual(await page.locator('.timeline-clip').evaluateAll(es => es.map(e => e.getAttribute('style'))), before);
+        check(`${modifier} shifted Redo with an empty Redo stack leaves the project unchanged`, await redo.isDisabled());
+    }
     await undo.click();
     await seek(1);
     await page.getByTitle('分割 (Ctrl+X)').click();
