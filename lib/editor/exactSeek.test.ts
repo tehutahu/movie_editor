@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatExactSeek, parseExactSeek, SEEK_FORMAT_ERROR, SEEK_RANGE_ERROR } from "./exactSeek";
+import { applyExactSeek, formatExactSeek, parseExactSeek, SEEK_FORMAT_ERROR, SEEK_RANGE_ERROR } from "./exactSeek";
 import { createCommandHistory, dispatchCommand, getCurrentProject, undo, updateEditorView } from "./commandHistory";
 import { createEmptyProject } from "./project";
 
@@ -30,5 +30,20 @@ describe("exact playhead input", () => {
     expect(after.redoStack).toBe(pending.redoStack);
     expect(after.undoStack).toHaveLength(pending.undoStack.length);
     expect(getCurrentProject(after)).toEqual({ ...before, playheadSec: 0.000001 });
+  });
+  it("rechecks queued load, duration and lock at adoption, preserving invalid history identity", () => {
+    const initial = createCommandHistory(createEmptyProject());
+    const pending = undo(dispatchCommand(initial, { type: "addTrack" })!.history)!;
+    const shortened = createCommandHistory({ ...getCurrentProject(pending), compositionDurationSec: 1 });
+    expect(applyExactSeek(shortened, 2, 1, 1, false)).toBe(shortened);
+    expect(applyExactSeek(pending, 2, 1, 2, false)).toBe(pending);
+    expect(applyExactSeek(pending, 2, 1, 1, true)).toBe(pending);
+    for (const target of [NaN, Infinity, -1, 0]) expect(applyExactSeek(pending, target, 1, 1, false)).toBe(pending);
+    const accepted = applyExactSeek(pending, 0.000001, 1, 1, false);
+    expect(getCurrentProject(accepted).playheadSec).toBe(0.000001);
+    expect(accepted.redoStack).toBe(pending.redoStack);
+    expect(accepted.undoStack).toHaveLength(pending.undoStack.length);
+    expect(getCurrentProject(accepted).assets).toBe(getCurrentProject(pending).assets);
+    expect(getCurrentProject(accepted).clips).toBe(getCurrentProject(pending).clips);
   });
 });

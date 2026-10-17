@@ -209,7 +209,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     isPlayingRef.current = false;
     playheadSecRef.current = parsed.value;
     setIsPlaying(false);
-    setPlayheadSec(parsed.value);
+    editor.setExactPlayheadSec(parsed.value, epoch);
   };
   const [fullscreenControlsVisible, setFullscreenControlsVisible] = useState(false);
   const hideControlsTimerRef = useRef<number | null>(null);
