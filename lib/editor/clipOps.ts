@@ -349,10 +349,16 @@ export function resizeClip(
       : Math.max(0, (asset?.sourceDurationSec ?? last.sourceOutSec) - last.sourceOutSec);
     last.sourceOutSec += Math.min(remaining, available);
   }
+  const durationSec = parts.reduce((sum, part) => sum + partDuration(part), 0);
+  // A source-bound extension can resolve to exactly the existing clip. Do not
+  // create an edit (or discard Redo) when the resolved media is unchanged.
+  if (durationSec === clip.durationSec && parts.length === clip.parts.length &&
+      parts.every((part, i) => part.assetId === clip.parts[i]!.assetId &&
+        part.sourceInSec === clip.parts[i]!.sourceInSec && part.sourceOutSec === clip.parts[i]!.sourceOutSec)) return null;
   const next = cloneProject(project);
   next.clips = next.clips.map((c) => c.id === clipId ? {
     ...c,
-    durationSec: parts.reduce((sum, part) => sum + partDuration(part), 0),
+    durationSec,
     parts,
   } : c);
   next.compositionDurationSec = computeCompositionDuration(next.clips);
