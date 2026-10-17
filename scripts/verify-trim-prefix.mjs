@@ -6,8 +6,8 @@ import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
 const suite=verification('trim-prefix',3157),{evidence,baseURL,ff}=suite;
-let page;const checks=[],errors=[],forbidden=[];
-function check(name,condition=true){assert(condition,name);checks.push(name);console.log('PASS',name);fs.writeFileSync(`${evidence}/results.json`,JSON.stringify({checks,errors,forbidden},null,2));}
+let page;const checks=[],errors=[],forbidden=[],hitTests=[];
+function check(name,condition=true){assert(condition,name);checks.push(name);console.log('PASS',name);fs.writeFileSync(`${evidence}/results.json`,JSON.stringify({checks,errors,forbidden,hitTests},null,2));}
 async function save(){await page.getByRole('button',{name:'新しい保存版を保存',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.busy-banner'));const{projects}=await(await page.request.get(`${baseURL}/api/projects`)).json();return(await page.request.get(`${baseURL}/api/projects/${projects.at(-1).id}`)).json();}
 async function load(doc,name){const file=`${evidence}/${name}.json`;fs.writeFileSync(file,JSON.stringify(doc));await page.locator('.project-persistence input[type=file]').setInputFiles(file);await page.waitForFunction(()=>!document.querySelector('.busy-banner')||[...document.querySelectorAll('button')].some(b=>b.textContent==='破棄して続ける'));const discard=page.getByRole('button',{name:'破棄して続ける',exact:true});if(await discard.isVisible())await discard.click();await page.waitForFunction(()=>!document.querySelector('.busy-banner'));assert.deepEqual(await page.locator('.error-banner').allTextContents(),[]);}
 async function exportProject(project,name){
@@ -39,7 +39,17 @@ async function seek(t){const b=await page.locator('.timeline-scroll').boundingBo
     const doc=structuredClone(template);doc.version=contain?2:1;const c=doc.project.clips[0];c.timelineStartSec=2;c.durationSec=4;
     c.parts=[{assetId:c.parts[0].assetId,sourceInSec:1,sourceOutSec:2},{assetId:c.parts[0].assetId,sourceInSec:3,sourceOutSec:6}];
     c.transform={x:.4,y:.6,scale:.8};if(contain)c.layoutMode='contain';doc.project.compositionDurationSec=12;doc.project.compositionWidth=320;doc.project.compositionHeight=320;
-    await load(doc,`input-${contain}`);await page.locator('.timeline-clip').click({position:{x:30,y:10}});await seek(3.5);
+    await load(doc,`input-${contain}`);await trim.focus();await page.locator('.timeline-clip').click({position:{x:30,y:10}});
+    const tip=await page.locator('.trim-start-reason').boundingBox(),ruler=await page.locator('.timeline-ruler').boundingBox(),scroll=await page.locator('.timeline-scroll').boundingBox();
+    assert(tip&&ruler&&scroll);const left=Math.max(tip.x,ruler.x),right=Math.min(tip.x+tip.width,ruler.x+ruler.width),top=Math.max(tip.y,ruler.y),bottom=Math.min(tip.y+tip.height,ruler.y+ruler.height);
+    assert(right>left&&bottom>top,'focused explanation must actually overlap the ruler');
+    const x=(left+right)/2,y=(top+bottom)/2,scrollLeft=await page.locator('.timeline-scroll').evaluate(e=>e.scrollLeft),expectedSec=(x-scroll.x-48+scrollLeft)/80;
+    assert(expectedSec>0&&x>=tip.x&&x<=tip.x+tip.width&&y>=tip.y&&y<=tip.y+tip.height);
+    hitTests.push({mode:contain?'contain':'stretch',tip,ruler,scroll,click:{x,y},expectedSec});
+    await page.mouse.click(x,y);
+    await page.waitForFunction(expected=>Math.abs(parseFloat(document.querySelector('.timeline-ruler .timeline-playhead').style.left)-(48+expected*80))<.01,expectedSec);
+    check(`${contain?'v2':'v1'} ruler click inside the focused explanation overlap changes the playhead after clip selection`);
+    await seek(3.5);
     await trim.focus();await page.keyboard.press(contain?'Enter':'Space');
     await page.waitForFunction(()=>parseFloat(document.querySelector('.timeline-clip').style.left)===328);
     const saved=await save(),n=saved.project.clips[0];
