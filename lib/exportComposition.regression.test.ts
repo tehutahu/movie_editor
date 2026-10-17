@@ -102,6 +102,8 @@ it.skipIf(!real)("real ffmpeg: missing later source and out-of-range parts fail 
   sources.delete(p.assets[1]!.id);
   await expect(exportCompositionToFile({ project, jobDir, outputPath: path.join(jobDir, "out.mp4") })).rejects.toThrow(/素材/);
   sources.set(p.assets[1]!.id, source);
+  // Keep the model duration consistent so this isolates the media-range guard.
+  project.clips[0]!.durationSec += 100 - project.clips[0]!.parts[2]!.sourceOutSec;
   project.clips[0]!.parts[2]!.sourceOutSec = 100;
   await expect(exportCompositionToFile({ project, jobDir, outputPath: path.join(jobDir, "out.mp4") })).rejects.toThrow(/長さ/);
 }, 120000);

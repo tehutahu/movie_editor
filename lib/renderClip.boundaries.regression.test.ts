@@ -130,6 +130,7 @@ it.skipIf(!real)("real ffmpeg: 50 parts preserve the independently concatenated 
   const dir = path.join(root, "fifty"); await mkdir(dir); state.calls.length = 0;
   const output = path.join(dir, "part_0.mp4");
   await renderClipToFile({ clip: c, assets: project.assets, jobDir: dir, outputPath: output, width: 64, height: 64 });
+  await writeFile(path.join(dir, "commands.json"), JSON.stringify(state.calls, null, 2));
   const join = state.calls.at(-1)!;
   const inputs = Array.from({ length: 50 }, (_, i) => path.join(dir, `part_0_source_${i}.mp4.keep`));
   const graph = join[join.indexOf("-filter_complex") + 1];
