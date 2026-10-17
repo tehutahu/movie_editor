@@ -192,7 +192,10 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     transform: ClipTransform;
   } | null>(null);
   const [hoverCursor, setHoverCursor] = useState<string>("default");
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpOpen, setHelpOpenState] = useState(false);
+  const setHelpOpen = (value: boolean) => { editor.setRestoreHelpBlocked(value); setHelpOpenState(value); };
+  const setRestoreHelpBlocked = editor.setRestoreHelpBlocked;
+  useEffect(() => () => setRestoreHelpBlocked(false), [setRestoreHelpBlocked]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const seekBlocked = Boolean(editor.busy) || editor.persistence.locked || helpOpen;
   const seekBlockedRef = useRef(seekBlocked);

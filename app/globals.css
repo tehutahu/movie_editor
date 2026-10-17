@@ -1102,3 +1102,10 @@ button.primary {
 }
 .trim-start-action:hover .trim-start-reason,
 .trim-start-action:focus-within .trim-start-reason { display: block; }
+
+.restore-rate-details { position: relative; font-size: 12px; }
+.restore-rate-details summary { cursor: pointer; }
+.restore-rate-support { position: absolute; z-index: 35; right: 0; top: 100%; width: 310px; padding: 12px; border: 1px solid #3f4758; border-radius: 6px; background: #1a1f29; box-shadow: 0 6px 20px #0006; }
+.restore-rate-support p { margin: 0 0 8px; overflow-wrap: anywhere; }
+.restore-rate-support button { margin: 0 6px 8px 0; }
+.restore-rate-warning { color: #f9c678; }

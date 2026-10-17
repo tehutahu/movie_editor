@@ -1,4 +1,5 @@
 "use client";
+import { RestoreInputAudio, RestoreInputAudioSummary } from "./RestoreInputAudio";
 
 import { trimStartReason, trimStartSnapshot } from "@/lib/editor/trimClipStart";
 import type { EditorProject } from "@/lib/editor/types";
@@ -152,17 +153,18 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
               onChange={(e) => setSpeedFactor(e.target.value)}
             />
           </label>
-          <label className="speed-restore-field" title="サンプルレート (Hz)">
-            <span>Hz</span>
+          <label className="speed-restore-field" title="音声の速度復元に使う基準Hz。入力音声のHzに合わせると映像と同じ係数になります。">
+            <span>復元基準Hz</span>
             <input
               id="sample-rate"
               type="number"
               step={1000}
               value={sampleRateHz}
-              disabled={Boolean(busy)}
+              disabled={Boolean(busy) || editor.persistence.locked || editor.restoreHelpBlocked}
               onChange={(e) => setSampleRateHz(e.target.value)}
             />
           </label>
+          <details className="restore-rate-details"><RestoreInputAudioSummary editor={editor} /><RestoreInputAudio editor={editor} /></details>
         </div>
         <button type="button" className="primary" onClick={() => void exportComposition()} disabled={Boolean(busy)} title="全体書き出し (Ctrl+E)">
           書き出し
