@@ -52,3 +52,11 @@ it("rejects WebP animation feature flags even if ANIM payload is absent",async()
  const file=path.join(dir,"flag.webp"),b=Buffer.alloc(30);b.write("RIFF");b.writeUInt32LE(22,4);b.write("WEBPVP8X",8);b.writeUInt32LE(10,16);b[20]=2;await writeFile(file,b);
  await expect(assertStillImageLayout(file,"webp")).rejects.toMatchObject({code:"UNSUPPORTED_LAYOUT_ANIMATION"});
 });
+
+it("public layout JSON keys exclude private audio repair metadata even for eligible media",async()=>{
+ const raw=video({start_time:"2",start_pts:30720,time_base:"1/15360"});
+ Object.assign(raw.format,{start_time:"0"});
+ raw.streams.push({codec_type:"audio",start_time:"0",start_pts:0,time_base:"1/44100",duration_ts:61740,duration:"1.4"} as unknown as typeof raw.streams[0]);
+ probe.mockResolvedValue(raw);
+ expect(Object.keys(await inspectMediaLayout("/current-resolved-input","video","mp4")).sort()).toEqual(["durationSec","hasAudio","height","origin","width"]);
+});

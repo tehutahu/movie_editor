@@ -49,6 +49,12 @@ jobs:
           FFMPEG_PATH: ""
         run: npx vitest run lib/renderClip.boundaries.regression.test.ts
 
+      - name: Contain audio regressions with the bundled encoder and probe
+        env:
+          FFMPEG_PATH: ""
+          FFPROBE_PATH: ""
+        run: npx vitest run lib/containAudioRepair.regression.test.ts
+
       - name: Build
         run: npm run build
 

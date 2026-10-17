@@ -1,6 +1,7 @@
 import { open } from "node:fs/promises";
 import { probeMedia } from "@/lib/ffmpeg";
 import { videoDisplayDimensions } from "@/lib/videoDimensions";
+import { containAudioSeekFromProbe, containAudioInputIdentity, sameContainAudioInput } from "@/lib/containAudioRepair";
 
 export class MediaLayoutError extends Error {
   constructor(public readonly code: string, message: string) { super(message); }
@@ -91,7 +92,7 @@ export async function assertStillImageLayout(file: string, ext: string): Promise
   } finally { await handle.close(); }
 }
 
-export async function inspectMediaLayout(input: string, kind: "image" | "video", ext: string) {
+async function inspectMediaLayoutCore(input: string, kind: "image" | "video", ext: string) {
   const raw = await probeMedia(input).catch(() => fail("LAYOUT_MEDIA_UNREADABLE"));
   const formats = raw.format?.format_name?.split(",") ?? [];
   const imageFormats = new Set(["png_pipe", "jpeg_pipe", "webp_pipe", "gif", "apng", "image2", "image2pipe"]);
@@ -132,7 +133,17 @@ export async function inspectMediaLayout(input: string, kind: "image" | "video",
   const display = videoDisplayDimensions(v);
   const origin = kind === "video" ? Number(v.start_time) : 0;
   if (!Number.isFinite(origin) || (kind === "video" && (typeof v.start_time !== "string" || !v.start_time.trim()))) fail("UNSUPPORTED_LAYOUT_TIMING");
-  return { width: display.width!, height: display.height!, origin,
+  return { publicLayout: { width: display.width!, height: display.height!, origin,
     hasAudio: raw.streams?.some(s => s.codec_type === "audio") ?? false,
-    durationSec: Number(raw.format?.duration) };
+    durationSec: Number(raw.format?.duration) }, audioSeek: kind === "video" ? containAudioSeekFromProbe(raw) : null };
+}
+
+/** Public API shape deliberately excludes server-only audio diagnostics. */
+export async function inspectMediaLayout(input: string, kind: "image" | "video", ext: string) {
+  return (await inspectMediaLayoutCore(input, kind, ext)).publicLayout;
+}
+export async function inspectRenderMediaLayout(input: string, kind: "image" | "video", ext: string) {
+  const identity = await containAudioInputIdentity(input);
+  const { publicLayout, audioSeek } = await inspectMediaLayoutCore(input, kind, ext);
+  return { ...publicLayout, audioSeek: audioSeek && identity && await sameContainAudioInput(identity) ? { ...audioSeek, inputIdentity: identity } : null };
 }

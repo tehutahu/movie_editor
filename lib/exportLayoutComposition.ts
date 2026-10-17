@@ -3,7 +3,8 @@ import path from "node:path";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { resolveAssetInputPath } from "@/lib/assetResolve";
 import { probeVideo, runFfmpegCommand } from "@/lib/ffmpeg";
-import { inspectMediaLayout, MediaLayoutError } from "@/lib/mediaLayout";
+import { inspectRenderMediaLayout, MediaLayoutError } from "@/lib/mediaLayout";
+import { repairContainAudio } from "@/lib/containAudioRepair";
 import { renderClipToFile } from "@/lib/renderClip";
 import type { Asset, Clip, EditorProject } from "@/lib/editor/types";
 import { clipsForExportComposition, compositionFrameAt, COMPOSITION_BG_FFMPEG, MAX_CLIP_SCALE,
@@ -22,7 +23,7 @@ function rectFor(clip: Clip, project: EditorProject) {
 async function media(asset: Asset) {
   const input = await resolveAssetInputPath(asset);
   if (!input) throw new MediaLayoutError("LAYOUT_MEDIA_MISSING", "素材が見つかりません。再リンクしてください。");
-  return { input, ...await inspectMediaLayout(input, asset.kind, asset.ext) };
+  return { input, ...await inspectRenderMediaLayout(input, asset.kind, asset.ext) };
 }
 /** Revalidate actual media before registering a layout job; never trust client dimensions. */
 export async function validateContainMedia(project: EditorProject): Promise<void> {
@@ -69,7 +70,12 @@ async function prepareContain(clip: Clip, project: EditorProject, dir: string, c
       const output = path.join(dir, `a${ci}-${pi}.wav`);
       const inputArgs = asset.kind === "video" && info.hasAudio ? ["-ss", num(part.sourceInSec), "-i", info.input] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"];
       await runFfmpegCommand(["-y", ...inputArgs, "-vn", "-af", "aresample=48000,apad", "-ac", "2", "-ar", "48000", "-t", num(duration), "-c:a", "pcm_s16le", output]);
-      audios.push(output);
+      const repaired = await repairContainAudio({ input: info.input, sourceIn: part.sourceInSec,
+        durationArg: num(duration), descriptor: asset.kind === "video" && info.hasAudio ? info.audioSeek : null,
+        oldFile: output, retryFile: path.join(dir, `a${ci}-${pi}-retry.wav`) });
+      if (repaired.status !== "ineligible")
+        console.info("Contain audio repair", { status: repaired.status, oldSamples: String(repaired.oldSamples), newSamples: repaired.newSamples === undefined ? undefined : String(repaired.newSamples) });
+      audios.push(repaired.file);
     }
     offset = end;
   }
