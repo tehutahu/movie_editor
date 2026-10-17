@@ -8,6 +8,7 @@ import type { Asset, Clip, EditorProject } from "./editor/types";
 import { createEmptyProject } from "./editor/project";
 import { exportCompositionToFile } from "./exportComposition";
 import { renderClipToFile } from "./renderClip";
+import { resolveFfmpegPath, resolveFfprobePath } from "./ffmpeg";
 const state = vi.hoisted(() => ({ sources: new Map<string, string>(), calls: [] as string[][] }));
 vi.mock("@/lib/assetResolve", () => ({ resolveAssetInputPath: async (a: Asset) => state.sources.get(a.id) ?? null }));
 vi.mock("@/lib/ffmpeg", async importOriginal => {
@@ -21,7 +22,7 @@ vi.mock("@/lib/ffmpeg", async importOriginal => {
 const real = process.env.RUN_FFMPEG_TESTS === "1";
 let root: string, project: EditorProject;
 function ff(args: string[], input?: Buffer) {
-  return execFileSync(process.env.FFMPEG_PATH ?? "/usr/bin/ffmpeg", ["-v", "error", "-y", ...args], { input, maxBuffer: 64 * 1024 * 1024 });
+  return execFileSync(resolveFfmpegPath(), ["-v", "error", "-y", ...args], { input, maxBuffer: 128 * 1024 * 1024 });
 }
 function raw(file: string, audio = false): Buffer {
   return ff(["-i", file, "-map", audio ? "0:a:0" : "0:v:0", ...(audio ? ["-f", "s16le"] : ["-pix_fmt", "rgb24", "-f", "rawvideo"]), "pipe:1"]);
@@ -80,11 +81,35 @@ it.skipIf(!real)("real ffmpeg: fixes the captured mixed-fps boundary and retains
   expect(readFrame(video, 75)).toEqual({ id: 30, asset: "B" });
   const old = raw(legacyCase(c, result));
   expect(readFrame(old, 60)).toEqual({ id: 29, asset: "A" });
-  expect(readFrame(old, 75)).toEqual({ id: 29, asset: "B" });
+  const version = execFileSync(resolveFfmpegPath(), ["-version"], { encoding: "utf8" }).split("\n")[0];
+  // The old bundled 25fps encoder loses one additional source frame here.
+  expect(readFrame(old, 75)).toEqual({ id: /ffmpeg version 7\.0\.2-static/.test(version) ? 28 : 29, asset: "B" });
 }, 120000);
-it.skipIf(!real)("real ffmpeg: preserves all decoded RGB and PCM at an already-correct frame-aligned part duration", async () => {
+it.skipIf(!real)("real ffmpeg: preserves correct-clock RGB/PCM and repairs the measured bundled 25fps fallback", async () => {
   const c = clip(1.75, 1, 1.2), result = await exportCase("compatible", c), old = legacyCase(c, result);
-  expect(raw(result.output).equals(raw(old))).toBe(true);
+  const version = execFileSync(resolveFfmpegPath(), ["-version"], { encoding: "utf8" }).split("\n")[0];
+  if (/ffmpeg version 7\.0\.2-static/.test(version)) {
+    // This exact bundled fixture's old encoder fell back to 25fps, so it is
+    // a measured broken-clock control, not the already-correct RGB baseline.
+    const legacyPrepared = path.join(result.dir, "legacy-part.mp4");
+    const meta = JSON.parse(execFileSync(resolveFfprobePath(), ["-v", "error", "-select_streams", "v:0",
+      "-show_entries", "stream=r_frame_rate,nb_frames", "-of", "json", legacyPrepared], { encoding: "utf8" }));
+    expect(meta.streams[0]).toEqual({ r_frame_rate: "25/1", nb_frames: "30" });
+    const expected = [...[24, 25, 25, 26, 27, 28].map(id => ({ id, asset: "A" })),
+      ...Array.from({ length: 30 }, (_, i) => ({ id: 15 + i, asset: "B" }))];
+    const prepared = raw(path.join(result.dir, "part_0.mp4.keep")), final = raw(result.output);
+    expect(prepared.length / (320 * 320 * 3)).toBe(36);
+    expect(expected.map((_, i) => readFrame(prepared, i))).toEqual(expected);
+    expect(expected.map((_, i) => readFrame(final, 53 + i))).toEqual(expected);
+    expect(readFrame(raw(old), 59).asset).toBe("A");
+    expect(readFrame(final, 59).asset).toBe("B");
+  } else {
+    // Keep the strict decoded-pixel compatibility gate for the correct clock.
+    const meta = JSON.parse(execFileSync(resolveFfprobePath(), ["-v", "error", "-select_streams", "v:0",
+      "-show_entries", "stream=r_frame_rate,nb_frames", "-of", "json", path.join(result.dir, "legacy-part.mp4")], { encoding: "utf8" }));
+    expect(meta.streams[0]).toEqual({ r_frame_rate: "30/1", nb_frames: "36" });
+    expect(raw(result.output).equals(raw(old))).toBe(true);
+  }
   expect(raw(result.output, true).equals(raw(old, true))).toBe(true);
 }, 120000);
 it.skipIf(!real)("real ffmpeg: ordinary nongrid and true subtick grid-after boundaries retain the intended owner", async () => {
@@ -160,5 +185,39 @@ it.skipIf(!real)("real ffmpeg: all planned tail packets decode across modulo-thr
       expect(readFrame(decoded, expectedFrames - 1)).toEqual({ id: 44 + i, asset: "B" });
       if (i === 0 && drift > 0) expect(readFrame(raw(result.output), 90)).toEqual({ id: 44, asset: "B" });
     }
+  }
+}, 120000);
+
+it.skipIf(!real)("real ffmpeg: a short 25fps EOF keeps the 120/60 ownership at the default encoder rate", async () => {
+  const assets: Asset[] = [];
+  for (const [name, color, fps, videoDuration, audioDuration] of [
+    ["eof-a", "red", 25, 3.96, 4.041], ["eof-b", "blue", 30, 2, 2],
+  ] as const) {
+    const file = path.join(root, `${name}.mp4`), id = randomUUID();
+    ff(["-f", "lavfi", "-i", `color=${color}:s=240x120:r=${fps}:d=${videoDuration}`,
+      "-f", "lavfi", "-i", `sine=frequency=440:sample_rate=44100:duration=${audioDuration}`,
+      "-c:v", "libx264", "-c:a", "aac", file]);
+    state.sources.set(id, file);
+    assets.push({ id, kind: "video", ext: "mp4", streamUrl: "/unused", displayName: name, sourceDurationSec: audioDuration });
+  }
+  const c: Clip = { id: randomUUID(), trackId: project.tracks[0].id, timelineStartSec: 0, durationSec: 6,
+    parts: [{ assetId: assets[0].id, sourceInSec: 0, sourceOutSec: 4 },
+      { assetId: assets[1].id, sourceInSec: 0, sourceOutSec: 2 }], transform: { x: .5, y: .5, scale: 1 } };
+  const dir = path.join(root, "25fps-eof"); await mkdir(dir); state.calls.length = 0;
+  const output = path.join(dir, "final.mp4");
+  await exportCompositionToFile({ project: { ...project, assets, clips: [c], compositionDurationSec: 10 }, jobDir: dir, outputPath: output });
+  await writeFile(path.join(dir, "commands.json"), JSON.stringify(state.calls, null, 2));
+  for (const file of [output, path.join(dir, "part_0.mp4.keep")]) {
+    const pixels = raw(file);
+    const owner = (n: number) => {
+      // The composition transform covers its center, not the bottom marker row.
+      const at = (n * 320 * 320 + 160 * 320 + 160) * 3;
+      expect(Math.max(pixels[at], pixels[at + 2])).toBeGreaterThan(128);
+      return pixels[at] > pixels[at + 2] ? "A" : "B";
+    };
+    expect(owner(119)).toBe("A");
+    expect(owner(120)).toBe("B");
+    expect(owner(121)).toBe("B");
+    expect(pixels.length / (320 * 320 * 3)).toBe(file === output ? 300 : 180);
   }
 }, 120000);
