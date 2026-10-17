@@ -163,6 +163,10 @@ export function useEditorStore() {
 
   const mutationLockedRef = useRef(false);
   mutationLockedRef.current = Boolean(busy) || persistence.locked;
+  // Help's existing setter updates its ref in the opening/closing event, so
+  // window listeners never wait for a render/effect to adopt the modal scope.
+  const areEditorShortcutsBlocked = useCallback(() =>
+    mutationLockedRef.current || restoreHelpBlockedRef.current, []);
   const getRestoreInputState = useCallback(() => ({ project: latestProjectRef.current, epoch: projectEpochRef.current, blocked: mutationLockedRef.current || restoreSubmissionRef.current || restoreHelpBlockedRef.current }), []);
   const restoreInputAudio = useRestoreInputAudio(project, projectEpoch, Boolean(busy) || persistence.locked || restoreHelpBlocked, getRestoreInputState, copySampleRate);
   const setSampleRateHz = (value: string) => { if (mutationLockedRef.current || restoreSubmissionRef.current || restoreHelpBlockedRef.current) return; restoreInputAudio.manualEdit(); copySampleRate(value); };
@@ -251,13 +255,13 @@ export function useEditorStore() {
   const getPreviewSeekState = useCallback(() => ({
     epoch: projectEpochRef.current,
     duration: latestProjectRef.current.compositionDurationSec,
-    blocked: mutationLockedRef.current,
-  }), []);
+    blocked: areEditorShortcutsBlocked(),
+  }), [areEditorShortcutsBlocked]);
 
   const setExactPlayheadSec = useCallback((target: number, expectedEpoch: number) => {
     setHistory(current => applyExactSeek(current, target, expectedEpoch,
-      projectEpochRef.current, mutationLockedRef.current));
-  }, []);
+      projectEpochRef.current, areEditorShortcutsBlocked()));
+  }, [areEditorShortcutsBlocked]);
 
   const setExportBaseName = useCallback((name: string) => {
     setHistory((h) => {
@@ -787,7 +791,7 @@ export function useEditorStore() {
     }
 
     function onKeyDown(e: KeyboardEvent) {
-      if (busy || persistence.locked) return;
+      if (areEditorShortcutsBlocked()) return;
       if (isEditableTarget(e.target)) return;
 
       const mod = e.ctrlKey || e.metaKey;
@@ -838,7 +842,7 @@ export function useEditorStore() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
-    busy, persistence.locked,
+    areEditorShortcutsBlocked,
     addTrack,
     deleteSelected,
     duplicateSelected,
@@ -851,7 +855,7 @@ export function useEditorStore() {
   ]);
 
   return {
-    persistence, projectEpoch, getPreviewSeekState, setExactPlayheadSec,
+    persistence, projectEpoch, getPreviewSeekState, setExactPlayheadSec, areEditorShortcutsBlocked,
     project,
     busy,
     error,

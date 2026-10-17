@@ -22,7 +22,7 @@ import type { Asset } from "@/lib/editor/types";
 import { createPreviewFrames } from "@/lib/editor/previewFrames";
 import { parseExactSeek } from "@/lib/editor/exactSeek";
 import { ExactSeekInput } from "./ExactSeekInput";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const EDITOR_HELP_ITEMS = [
   { keys: "Delete", desc: "削除" },
@@ -177,7 +177,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   const playRafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
 
-  const { project, setPlayheadSec, selectClip, updateClipTransform, audioVideoRef } = editor;
+  const { project, setPlayheadSec, selectClip, updateClipTransform, audioVideoRef, areEditorShortcutsBlocked } = editor;
 
   const projectRef = useRef(project);
   projectRef.current = project;
@@ -193,9 +193,17 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   } | null>(null);
   const [hoverCursor, setHoverCursor] = useState<string>("default");
   const [helpOpen, setHelpOpenState] = useState(false);
+  const helpTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const helpCloseRef = useRef<HTMLButtonElement | null>(null);
   const setHelpOpen = (value: boolean) => { editor.setRestoreHelpBlocked(value); setHelpOpenState(value); };
   const setRestoreHelpBlocked = editor.setRestoreHelpBlocked;
   useEffect(() => () => setRestoreHelpBlocked(false), [setRestoreHelpBlocked]);
+  useLayoutEffect(() => {
+    if (!helpOpen) return;
+    const opener = helpTriggerRef.current;
+    helpCloseRef.current?.focus();
+    return () => { if (opener?.isConnected) opener.focus(); };
+  }, [helpOpen]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const seekBlocked = Boolean(editor.busy) || editor.persistence.locked || helpOpen;
   const seekBlockedRef = useRef(seekBlocked);
@@ -277,7 +285,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (editor.busy || editor.persistence.locked || isEditableTarget(e.target) || helpOpen) return;
+      if (areEditorShortcutsBlocked() || isEditableTarget(e.target)) return;
 
       const mod = e.ctrlKey || e.metaKey;
 
@@ -303,7 +311,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editor.busy, editor.persistence.locked, helpOpen, seekStart, stepBack, stepForward, seekEnd, togglePlay]);
+  }, [areEditorShortcutsBlocked, seekStart, stepBack, stepForward, seekEnd, togglePlay]);
 
   useEffect(() => () => clearHideControlsTimer(), [clearHideControlsTimer]);
 
@@ -828,6 +836,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
         />
         <video ref={audioVideoRef} className="compositor-audio-hidden" playsInline />
         <button
+          ref={helpTriggerRef}
           type="button"
           className="preview-help-btn"
           onClick={() => setHelpOpen(true)}
@@ -871,6 +880,14 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
             aria-modal="true"
             aria-labelledby="help-modal-title"
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={(event) => {
+              // This help dialog has exactly one focusable control. Keep both
+              // Tab directions inside it without overriding native close keys.
+              if (event.key === "Tab") {
+                event.preventDefault();
+                helpCloseRef.current?.focus();
+              }
+            }}
           >
             <h2 id="help-modal-title">操作ヘルプ</h2>
             <ul className="help-modal-list">
@@ -881,7 +898,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
                 </li>
               ))}
             </ul>
-            <button type="button" className="secondary" onClick={() => setHelpOpen(false)}>
+            <button ref={helpCloseRef} type="button" className="secondary" onClick={() => setHelpOpen(false)}>
               閉じる
             </button>
           </div>
