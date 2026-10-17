@@ -700,17 +700,19 @@ export function useEditorStore() {
         throw new Error("速度復元の対象が変更されたため、結果を適用しませんでした。");
       }
 
-      setHistory((h) => {
-        if (!sourceStillCurrent(getCurrentProject(h))) return h;
-        const result = dispatchCommand(h, {
-          type: "restoreSpeed",
-          assetId: asset.id,
-          jobId: json.jobId!,
-          speedFactor: factor,
-          ...restored,
-        });
-        return result?.history ?? h;
+      // Calculate in this caught boundary: validation failures must not throw from a React updater.
+      const snapshot = latestHistoryRef.current;
+      if (!sourceStillCurrent(getCurrentProject(snapshot))) {
+        throw new Error("速度復元の対象が変更されたため、結果を適用しませんでした。");
+      }
+      const result = dispatchCommand(snapshot, {
+        type: "restoreSpeed",
+        assetId: asset.id,
+        jobId: json.jobId!,
+        speedFactor: factor,
+        ...restored,
       });
+      setHistory(h => h === snapshot && sourceStillCurrent(getCurrentProject(h)) ? result?.history ?? h : h);
 
       const pending = { clientId: crypto.randomUUID(), epoch, assetId: asset.id, jobId: json.jobId, clipId };
       setPendingRestores((previous) => [...previous, pending]);

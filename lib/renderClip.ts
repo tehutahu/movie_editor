@@ -81,7 +81,9 @@ export async function renderClipToFile(params: {
     await runFfmpegCommand(["-y", ...paths.flatMap((p) => ["-i", p]),
       "-filter_complex", filters.join(";"), "-map", "[v]",
       ...(audios.length ? ["-map", "[a]", "-c:a", "aac"] : ["-an"]),
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-bsf:v", "setts=pts=PTS:dts=DTS:duration=1/(30*TB)", "-t", String(clip.durationSec), "-movflags", "+faststart", outputPath],
+      // Preserve the finite ownership PTS instead of resampling at an
+      // inferred encoder rate. Keep the filter's AVTB clock through encoding.
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-fps_mode:v", "passthrough", "-enc_time_base:v", "1:1000000", "-bsf:v", "setts=pts=PTS:dts=DTS:duration=1/(30*TB)", "-t", String(clip.durationSec), "-movflags", "+faststart", outputPath],
     { totalDurationSec: clip.durationSec });
   } finally {
     await Promise.all(paths.map((p) => unlink(p).catch(() => undefined)));

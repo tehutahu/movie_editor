@@ -44,6 +44,11 @@ jobs:
       - name: Test (including real ffmpeg regressions)
         run: npm test
 
+      - name: Multipart regressions with the bundled encoder
+        env:
+          FFMPEG_PATH: ""
+        run: npx vitest run lib/renderClip.boundaries.regression.test.ts
+
       - name: Build
         run: npm run build
 
