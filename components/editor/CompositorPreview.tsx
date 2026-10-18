@@ -33,6 +33,7 @@ import { ExactSeekInput } from "./ExactSeekInput";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const EDITOR_HELP_ITEMS = [
+  { keys: "Ctrl/Cmd+A", desc: "全トラックの全クリップを選択（入力欄では文字の全選択）" },
   { keys: "Ctrl/Cmd+クリック", desc: "複数選択の追加・解除" },
   { keys: "選択済クリップを通常ドラッグ", desc: "まとめて横移動（元トラック・間隔を維持、重なれば全体を取消）" },
   { keys: "Alt（移動中）", desc: "再生位置への吸着を一時解除" },
