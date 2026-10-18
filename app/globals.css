@@ -1122,3 +1122,7 @@ button.primary {
 }
 
 .group-move-status:empty { display: none; }
+
+.clip-audio-control { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 4px 8px; font-size: .8rem; }
+.clip-audio-control input { width: 76px; }
+.clip-audio-control button { padding: 4px 8px; font-size: .8rem; }

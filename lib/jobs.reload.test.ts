@@ -22,9 +22,41 @@ function deferred() {
   return { promise, resolve };
 }
 afterEach(async () => {
-  for (const jobs of modules.splice(0)) jobs.clearJobStoreForTests();
+  for (const jobs of modules.splice(0)) { await jobs.flushJobWritesForTests(); jobs.clearJobStoreForTests(); }
   vi.doUnmock("@/lib/paths"); vi.doUnmock("node:fs/promises"); vi.resetModules();
   await Promise.all(roots.splice(0).map(value => rm(value, { recursive: true, force: true })));
+});
+
+it("drains delayed metadata and writes queued during the drain before deleting its owned root", async () => {
+  const location = await root(), started = deferred(), release = deferred();
+  const patchedStarted = deferred(), patchedRelease = deferred();
+  vi.doMock("node:fs/promises", async importOriginal => {
+    const original = await importOriginal<typeof import("node:fs/promises")>();
+    return { ...original, writeFile: async (...args: Parameters<typeof writeFile>) => {
+      if (JSON.parse(String(args[1])).status === "pending") { started.resolve(); await release.promise; }
+      else { patchedStarted.resolve(); await patchedRelease.promise; }
+      return original.writeFile(...args);
+    } };
+  });
+  const jobs = await reload(location), job = jobs.createJobRecord("export_segment");
+  await started.promise;
+  let settled = false;
+  const drain = jobs.flushJobWritesForTests().then(() => { settled = true; });
+  jobs.patchJobRecord(job.id, { status: "done" });
+  try {
+    await new Promise<void>(done => setImmediate(done));
+    expect(settled).toBe(false);
+    release.resolve();
+    await patchedStarted.promise;
+    await new Promise<void>(done => setImmediate(done));
+    expect(settled).toBe(false);
+  } finally { release.resolve(); patchedRelease.resolve(); await drain; }
+  expect(JSON.parse(await readFile(path.join(location, job.id, "meta.json"), "utf8")).status).toBe("done");
+  jobs.clearJobStoreForTests();
+  const ownedRoot = path.dirname(location);
+  await rm(ownedRoot, { recursive: true, force: true });
+  roots.splice(roots.indexOf(ownedRoot), 1);
+  await expect(readFile(path.join(location, job.id, "meta.json"))).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 it("shares records across module evaluation and normalized aliases of the same root", async () => {

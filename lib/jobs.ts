@@ -120,6 +120,15 @@ export function clearJobStoreForTests(): void {
   jobs.clear();
 }
 
+/** テストのみ: 所有ルートの非同期メタデータ書き込みを削除前に完了させます。 */
+export async function flushJobWritesForTests(): Promise<void> {
+  for (;;) {
+    const snapshot = new Map(writes);
+    await Promise.all(snapshot.values());
+    if (snapshot.size === writes.size && [...snapshot].every(([id, pending]) => writes.get(id) === pending)) return;
+  }
+}
+
 /** `pending` / `running` のジョブディレクトリはストレージ整理から除外します。 */
 export function listPendingRunningJobIds(): string[] {
   const out: string[] = [];

@@ -1,3 +1,4 @@
+import { mergedAudioGain } from "./clipAudio";
 import type { Asset, Clip, ClipPart, EditorProject } from "@/lib/editor/types";
 import { newId } from "@/lib/newId";
 import {
@@ -189,6 +190,8 @@ export function mergeClips(
   if (!clips.every((c) => c.trackId === trackId)) return null;
 
   const sorted = [...clips].sort((a, b) => a.timelineStartSec - b.timelineStartSec);
+  const gain = mergedAudioGain(project, sorted);
+  if (gain === null) return null;
   const mergedParts: ClipPart[] = [];
 
   for (const clip of sorted) {
@@ -204,6 +207,7 @@ export function mergeClips(
     parts: mergedParts,
     transform: { ...sorted[0]!.transform },
     ...(sorted[0]!.layoutMode ? { layoutMode: sorted[0]!.layoutMode } : {}),
+    ...(gain === 1 ? {} : { audioGain: gain }),
   };
 
   const removeIds = new Set(clipIds);

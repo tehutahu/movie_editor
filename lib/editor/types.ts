@@ -44,6 +44,8 @@ export type Clip = {
   parts: ClipPart[];
   transform: ClipTransform;
   layoutMode?: ClipLayoutMode;
+  /** Linear audio gain; omitted means 1, zero silences without changing selection. */
+  audioGain?: number;
 };
 
 export type EditorProject = {

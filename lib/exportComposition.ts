@@ -1,3 +1,4 @@
+import { audioGainFilter } from "@/lib/editor/clipAudio";
 import { exportLayoutCompositionToFile } from "@/lib/exportLayoutComposition";
 import type { Asset, Clip, EditorProject, Track } from "@/lib/editor/types";
 import {
@@ -133,7 +134,7 @@ async function buildCompositionAudioFilterGraph(
     const delayMs = formatFfmpegFilterInt(
       Math.round(p.clip.timelineStartSec * 1000), 0, MAX_COMPOSITION_DURATION_SEC * 1000,
     );
-    filters.push(`[${p.inputIndex}:a]adelay=${delayMs}|${delayMs}[${label}]`);
+    filters.push(`[${p.inputIndex}:a]${audioGainFilter(p.clip)}adelay=${delayMs}|${delayMs}[${label}]`);
     audioLabels.push(`[${label}]`);
   }
 
