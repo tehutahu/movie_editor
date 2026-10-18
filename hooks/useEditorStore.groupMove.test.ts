@@ -15,11 +15,14 @@ vi.mock("react",()=>({
 }));
 vi.mock("@/hooks/useRestoreInputAudio",()=>({useRestoreInputAudio:()=>({manualEdit:vi.fn()})}));
 vi.mock("@/hooks/useProjectPersistence",()=>({useProjectPersistence:()=>({locked:harness.locked})}));
+// Native capture/effect ownership belongs to the real browser gate; this harness
+// controls only queued commands and injects history into its first state cell.
+vi.mock("@/hooks/useMoveToPlayheadCapture",()=>({useMoveToPlayheadCapture:()=>({active:false,isActive:()=>false})}));
 import { useEditorStore } from "./useEditorStore";
 function render(){harness.cursor=0;return useEditorStore();}
 function setup(){
  render();const p=createEmptyProject();p.tracks=[{id:"t",order:0}];p.clips=[1,3].map((timelineStartSec,i)=>({id:`c${i}`,trackId:"t",timelineStartSec,durationSec:1,parts:[{assetId:"a",sourceInSec:0,sourceOutSec:1}],transform:{x:.5,y:.5,scale:1}}));p.selectedClipIds=["c0","c1"];
- harness.cells[0].value=createCommandHistory(p);return render();
+ harness.cells[0].value=createCommandHistory(p);const editor=render();expect(editor.project.clips).toHaveLength(2);return editor;
 }
 beforeEach(()=>{harness.cells=[];harness.cursor=0;harness.locked=false;});
 it("queued zoom setter followed by stale group callback cannot commit against the old zoom",()=>{
@@ -45,4 +48,14 @@ it("queued playhead-only navigation remains valid and adopts the rendered delta 
  editor.setPlayheadSec(5);editor.moveSelectedClips(snapshot,1);const current=render();
  expect(current.project.clips.map(c=>c.timelineStartSec)).toEqual([2,4]);expect(current.project.playheadSec).toBe(5);expect((harness.cells[0].value as CommandHistory).undoStack).toHaveLength(2);
  expect(getCurrentProject(harness.cells[0].value as CommandHistory)).toBe(current.project);
+});
+it("explicit click target rejects queued playhead progress instead of moving to a later position",()=>{
+ const editor=setup();editor.setPlayheadSec(5);editor.moveSelectionToPlayhead();const current=render();
+ expect(current.project.playheadSec).toBe(5);expect(current.project.clips).toBe(editor.project.clips);
+ expect((harness.cells[0].value as CommandHistory).undoStack).toHaveLength(1);
+});
+it("explicit placement ignores zoom-only changes and rejects a second stale queued click",()=>{
+ const editor=setup();editor.setTimelineZoom(2);editor.moveSelectionToPlayhead();editor.moveSelectionToPlayhead();const current=render();
+ expect(current.timelineZoom).toBe(2);expect(current.project.clips.map(c=>c.timelineStartSec)).toEqual([0,2]);
+ expect(current.project.playheadSec).toBe(0);expect((harness.cells[0].value as CommandHistory).undoStack).toHaveLength(2);
 });
