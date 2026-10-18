@@ -1,3 +1,4 @@
+import { audioFadeExportFilter } from "@/lib/audioFadeExport";
 import { isMediaClip, type MediaClip } from "./editor/types";
 import { audioGainFilter } from "@/lib/editor/clipAudio";
 import { copyTitleRaster } from "./titleRenderer";
@@ -135,7 +136,7 @@ export async function exportLayoutCompositionToFile(params: { project: EditorPro
       // Existing stretch outputs may have no audio (single silent video).
       const hasAudio = p.matte ? p.audio : p.audio && (await probeVideo(p.file)).hasAudio;
       if (await hasAudio) {
-        filters.push(`[${j}:a:0]${audioGainFilter(p.clip)}adelay=${Math.round(p.clip.timelineStartSec * 1000)}|${Math.round(p.clip.timelineStartSec * 1000)}[a${i}]`);
+        filters.push(`[${j}:a:0]${audioGainFilter(p.clip)}${await audioFadeExportFilter(p.clip,p.file)}adelay=${Math.round(p.clip.timelineStartSec * 1000)}|${Math.round(p.clip.timelineStartSec * 1000)}[a${i}]`);
         audioLabels.push(`[a${i}]`);
       }
     }

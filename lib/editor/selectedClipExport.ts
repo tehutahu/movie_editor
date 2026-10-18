@@ -22,7 +22,7 @@ export function selectedClipExportRequest(project: EditorProject, clip: Clip) {
       startSec: part.sourceInSec, endSec: part.sourceOutSec, exportBaseName,
     } };
   }
-  const { audioGain: _gain, ...sourceClip } = structuredClone(clip);
+  const { audioGain: _gain, audioFade: _fade, ...sourceClip } = structuredClone(clip);
   const size = compositionSizeFromAsset(first.width ?? project.compositionWidth, first.height ?? project.compositionHeight);
   return { url: "/api/jobs/export-composition", body: {
     assets: [...new Map(assets.map((a) => [a.id, a])).values()],

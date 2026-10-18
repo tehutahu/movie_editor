@@ -1,4 +1,5 @@
 "use client";
+import { assetHasAudioFade, matchesAudioFadeSnapshot, mergedAudioFade, type AudioFadeSnapshot } from "@/lib/editor/clipAudioFade";
 
 import { isMediaClip } from "@/lib/editor/types";
 import { validateTitleText, titleDescriptor, matchesTitleEditSnapshot, type TitleEditSnapshot } from "@/lib/editor/title";
@@ -434,9 +435,13 @@ export function useEditorStore() {
       setError("結合するクリップを2つ以上選択してください（Ctrl+クリック）。");
       return;
     }
-    const selectedClips = cur.clips.filter(c => cur.selectedClipIds.includes(c.id));
+    const selectedClips = cur.clips.filter(c => cur.selectedClipIds.includes(c.id)).sort((a,b)=>a.timelineStartSec-b.timelineStartSec);
     if (mergedAudioGain(cur, selectedClips) === null) {
       setError("動画を含むクリップの音量を揃えてから結合してください。");
+      return;
+    }
+    if (selectedClips.every(isMediaClip) && !mergedAudioFade(selectedClips).allowed) {
+      setError("フェードが連続していません。各クリップのフェードを解除してから結合してください。");
       return;
     }
     setError(null);
@@ -496,6 +501,15 @@ export function useEditorStore() {
       if (current.clips.some(c=>current.selectedClipIds.includes(c.id)&&!isMediaClip(c))) return h;
       if (areEditorShortcutsBlocked() || !matchesClipAudioSnapshot(current, projectEpochRef.current, snapshot)) return h;
       return dispatchCommand(h, { type: "audioGain", clipIds: snapshot.clipIds, gain })?.history ?? h;
+    });
+  }, [areEditorShortcutsBlocked]);
+
+  const setSelectedAudioFade = useCallback((snapshot: AudioFadeSnapshot, input: {inSec:number;outSec:number} | null) => {
+    if (areEditorShortcutsBlocked()) return;
+    setHistory(h => {
+      const current = getCurrentProject(h);
+      if (areEditorShortcutsBlocked() || !matchesAudioFadeSnapshot(current, projectEpochRef.current, snapshot)) return h;
+      return dispatchCommand(h, input ? {type:"audioFade",clipId:snapshot.id,...input} : {type:"clearAudioFade",clipId:snapshot.id})?.history ?? h;
     });
   }, [areEditorShortcutsBlocked]);
 
@@ -743,10 +757,11 @@ export function useEditorStore() {
       return;
     }
 
+    if (assetHasAudioFade(cur, asset.id)) { setError("該当clipのフェードを解除してから復元してください。"); return; }
     const source = restoreSource(asset);
     const epoch = projectEpochRef.current;
     const sourceStillCurrent = (p: EditorProject) =>
-      projectEpochRef.current === epoch && matchesRestoreSource(p, source);
+      projectEpochRef.current === epoch && matchesRestoreSource(p, source) && !assetHasAudioFade(p, asset.id);
 
     restoreSubmissionRef.current = true;
     setBusy("速度復元中…");
@@ -985,7 +1000,7 @@ export function useEditorStore() {
     duplicateSelected,
     moveSelectedClip,
     moveSelectedClips,
-    setSelectedAudioGain,
+    setSelectedAudioGain, setSelectedAudioFade,
     addTitleClip,applyTitleText,
     resizeClipDuration,
     updateClipTransform,

@@ -61,6 +61,12 @@ jobs:
           FFPROBE_PATH: ""
         run: npx vitest run lib/clipAudio.regression.test.ts
 
+      - name: Audio fade regressions with the bundled encoder and probe
+        env:
+          FFMPEG_PATH: ""
+          FFPROBE_PATH: ""
+        run: npx vitest run lib/audioFadeExport.regression.test.ts
+
       - name: Title regressions with the bundled encoder and probe
         env:
           FFMPEG_PATH: ""

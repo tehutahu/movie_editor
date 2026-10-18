@@ -1,3 +1,4 @@
+import { mergedAudioFade, shiftedAudioFade, withAudioFade } from "./clipAudioFade";
 import { mergedAudioGain } from "./clipAudio";
 import type { Asset, Clip, ClipPart, EditorProject } from "@/lib/editor/types";
 import { newId } from "@/lib/newId";
@@ -173,13 +174,13 @@ export function splitClipAtPlayhead(
     durationSec: leftDur,
     parts: leftParts,
   };
-  const right: Clip = {
+  const right: Clip = withAudioFade({
     ...clip,
     id: newId(),
     timelineStartSec: clip.timelineStartSec + leftDur,
     durationSec: rightDur,
     parts: rightParts,
-  };
+  }, shiftedAudioFade(clip.audioFade, leftDur));
 
   const next = cloneProject(project);
   next.clips = next.clips.flatMap((c) => (c.id === clipId ? [left, right] : [c]));
@@ -203,6 +204,8 @@ export function mergeClips(
   const sorted = [...clips].sort((a, b) => a.timelineStartSec - b.timelineStartSec);
   const gain = mergedAudioGain(project, sorted);
   if (gain === null) return null;
+  const fade = mergedAudioFade(sorted);
+  if (!fade.allowed) return null;
   const mergedParts: ClipPart[] = [];
 
   for (const clip of sorted) {
@@ -219,6 +222,7 @@ export function mergeClips(
     transform: { ...sorted[0]!.transform },
     ...(sorted[0]!.layoutMode ? { layoutMode: sorted[0]!.layoutMode } : {}),
     ...(gain === 1 ? {} : { audioGain: gain }),
+    ...(fade.fade ? { audioFade: fade.fade } : {}),
   };
 
   const removeIds = new Set(clipIds);

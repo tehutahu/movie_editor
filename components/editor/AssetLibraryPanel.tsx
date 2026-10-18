@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { ClipAudioFadeControl } from "./ClipAudioFadeControl";
 import { TitleControl } from "./TitleControl";
 import type { EditorStore } from "@/hooks/useEditorStore";
 import { assetAdditionTrack } from "@/lib/editor/addAssetAtPlayhead";
@@ -37,6 +38,7 @@ export function AssetLibraryPanel({ editor }: { editor: EditorStore }) {
       {!target && <p className="muted">＋でトラックを追加してください。</p>}
       <p className="asset-add-status muted" role="status">{assetAdditionStatus}</p>
       <TitleControl editor={editor}/>
+      <ClipAudioFadeControl editor={editor}/>
       <div className="asset-grid">
         {project.assets.length === 0 ? (
           <p className="muted">動画・画像をアップロードしてください。</p>

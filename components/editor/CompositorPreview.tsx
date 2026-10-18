@@ -2,7 +2,10 @@
 
 import { useTitleImages, titleImageKey } from "@/hooks/useTitleImages";
 import { activeVisualClips } from "@/lib/editor/compositor";
-import type { Clip } from "@/lib/editor/types";
+import type { Clip, EditorProject } from "@/lib/editor/types";
+import { partAndSourceAtClipOffset } from "@/lib/editor/clipOps";
+import { FadePreviewOwner, type FadePreviewRequest } from "@/lib/editor/fadePreviewOwner";
+import { clipHasAudioFade } from "@/lib/editor/clipAudioFade";
 import { clipAudioGain } from "@/lib/editor/clipAudio";
 import type { EditorStore } from "@/hooks/useEditorStore";
 import {
@@ -45,6 +48,7 @@ const EDITOR_HELP_ITEMS = [
   { keys: "角をドラッグ", desc: "サイズ変更" },
   { keys: "ダブルクリック / ⛶", desc: "画面にフィット" },
   { keys: "Ctrl+ホイール", desc: "拡大縮小" },
+  { keys: "音声フェード → 適用 / Enter", desc: "単一動画のイン・アウト秒数を設定。解除で元音量、素材DLは元音声" },
   { keys: "Space", desc: "再生 / 一時停止" },
   { keys: "← / →", desc: "1フレーム戻る / 進む" },
   { keys: "Ctrl+← / Ctrl+→", desc: "先頭 / 末尾へ移動" },
@@ -173,6 +177,14 @@ function cursorForMode(mode: TransformDragMode | "default" | "hover-move" | Tran
   }
 }
 
+type PublicTimelinePair={position:number;performanceMs:number};
+export function fadeRequestAt(project:EditorProject,pair:PublicTimelinePair):FadePreviewRequest|null{
+  const audio=resolveAudioClipAtPlayhead(project,pair.position);
+  if(!audio||audio.clip.kind==="title"||!clipHasAudioFade(audio.clip))return null;
+  const part=partAndSourceAtClipOffset(audio.clip,pair.position-audio.clip.timelineStartSec);
+  return{key:JSON.stringify([audio.clip.id,audio.clip.timelineStartSec,part?audio.clip.parts.indexOf(part.part):-1,audio.asset.streamUrl,audio.clip.parts,audio.clip.audioFade,clipAudioGain(audio.clip)]),url:audio.asset.streamUrl,sourceTime:audio.sourceTimeSec,u:Math.max(0,pair.position-audio.clip.timelineStartSec),performanceMs:pair.performanceMs,gain:clipAudioGain(audio.clip),fade:audio.clip.audioFade!};
+}
+
 export function CompositorPreview({ editor }: { editor: EditorStore }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -187,8 +199,28 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
   const { project, setPlayheadSec, selectClip, updateClipTransform, audioVideoRef, areEditorShortcutsBlocked } = editor;
 
+  const fadeTimelineRef=useRef<PublicTimelinePair|null>(null);
+  const fadePlayIntent=useRef(0);
+  const fadePreparing=useRef(false);
+  const fadeOwnerRef=useRef<FadePreviewOwner|null>(null);
+  const [fadeError,setFadeError]=useState<string|null>(null);
+  const ensureFadeOwner=useCallback(()=>{
+    const native=audioVideoRef.current;
+    if(!native)throw Error("音声プレイヤーを準備できません。");
+    if(!fadeOwnerRef.current)fadeOwnerRef.current=new FadePreviewOwner(native,message=>{setFadeError(message);fadeTimelineRef.current=null;++fadePlayIntent.current;fadePreparing.current=false;isPlayingRef.current=false;setIsPlaying(false);});
+    return fadeOwnerRef.current;
+  },[audioVideoRef]);
+  useEffect(()=>()=>{fadeTimelineRef.current=null;++fadePlayIntent.current;const owner=fadeOwnerRef.current;fadeOwnerRef.current=null;void owner?.destroy().catch(()=>undefined);},[]);
+
   const projectRef = useRef(project);
   projectRef.current = project;
+  useLayoutEffect(()=>{
+    if(!isPlaying){fadeTimelineRef.current=null;return;}
+    const pair={position:project.playheadSec,performanceMs:performance.now()};
+    fadeTimelineRef.current=pair;
+    const request=fadeRequestAt(projectRef.current,pair);
+    if(request)fadeOwnerRef.current?.observeTimeline(request.key,request.u,request.performanceMs);
+  },[project.playheadSec,isPlaying,editor.projectEpoch]);
   const playheadSecRef = useRef(project.playheadSec);
   playheadSecRef.current = project.playheadSec;
   const setPlayheadSecRef = useRef(setPlayheadSec);
@@ -227,6 +259,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     lastTickRef.current = null;
     isPlayingRef.current = false;
     playheadSecRef.current = parsed.value;
+    ++fadePlayIntent.current;fadePreparing.current=false;fadeOwnerRef.current?.pause();
     setIsPlaying(false);
     editor.setExactPlayheadSec(parsed.value, epoch);
   };
@@ -258,7 +291,21 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     () => setPlayheadSec(Math.max(0, playheadSecRef.current - FRAME_STEP_SEC)),
     [setPlayheadSec],
   );
-  const togglePlay = useCallback(() => setIsPlaying((p) => !p), []);
+  const togglePlay = useCallback(() => {
+    if(isPlayingRef.current||fadePreparing.current){fadeTimelineRef.current=null;++fadePlayIntent.current;fadePreparing.current=false;isPlayingRef.current=false;fadeOwnerRef.current?.pause();setIsPlaying(false);return;}
+    const current=projectRef.current;
+    if(!current.clips.some(clipHasAudioFade)){setFadeError(null);setIsPlaying(true);return;}
+    const token=++fadePlayIntent.current;fadePreparing.current=true;
+    const failed=(error:unknown)=>{
+      if(token!==fadePlayIntent.current)return;
+      fadePreparing.current=false;setFadeError(String(error));
+      const audio=resolveAudioClipAtPlayhead(projectRef.current,projectRef.current.playheadSec);
+      // An unavailable dedicated graph must not disable the untouched native path.
+      if(!audio||!clipHasAudioFade(audio.clip))setIsPlaying(true);
+    };
+    try{void ensureFadeOwner().prepare().then(()=>{if(token===fadePlayIntent.current){fadePreparing.current=false;setFadeError(null);setIsPlaying(true);}}).catch(failed);}
+    catch(error){failed(error);}
+  }, [ensureFadeOwner]);
   const stepForward = useCallback(() => {
     setPlayheadSec(
       Math.min(projectRef.current.compositionDurationSec, playheadSecRef.current + FRAME_STEP_SEC),
@@ -458,14 +505,31 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     const video = audioVideoRef.current;
     if (!video) return;
     if (!audio) {
-      video.pause();
+      fadeOwnerRef.current?.pause();video.pause();
       return;
     }
+    if(clipHasAudioFade(audio.clip)){
+      const pair=fadeTimelineRef.current;
+      if(!isPlayingRef.current||!pair){fadeOwnerRef.current?.pause();video.pause();return;}
+      const request=fadeRequestAt(proj,pair);
+      if(!request){fadeOwnerRef.current?.pause();video.pause();return;}
+      try{ensureFadeOwner().sync(request,true);}
+      catch(e){fadeOwnerRef.current?.pause();video.pause();isPlayingRef.current=false;setIsPlaying(false);setFadeError(String(e));}
+      return;
+    }
+    fadeOwnerRef.current?.nativeMode();
     video.volume = clipAudioGain(audio.clip);
     const absUrl = new URL(audio.asset.streamUrl, window.location.origin).href;
     if (video.src !== absUrl) video.src = audio.asset.streamUrl;
-    syncVideoTime(video, audio.sourceTimeSec, isPlayingRef.current);
-  }, [audioVideoRef, syncVideoTime]);
+    const owner=fadeOwnerRef.current;
+    if(owner&&isPlayingRef.current&&video.paused){
+      if(Math.abs(video.currentTime-audio.sourceTimeSec)>0.05)video.currentTime=audio.sourceTimeSec;
+      owner.guardNativePlay(video.play(),()=>{
+        const p=projectRef.current,current=resolveAudioClipAtPlayhead(p,p.playheadSec);
+        return isPlayingRef.current&&!!current&&!clipHasAudioFade(current.clip)&&new URL(current.asset.streamUrl,window.location.origin).href===video.src;
+      });
+    }else syncVideoTime(video, audio.sourceTimeSec, isPlayingRef.current);
+  }, [audioVideoRef, syncVideoTime, ensureFadeOwner]);
 
   const draw = useCallback(() => {
     const layers = syncPooledMedia();
@@ -569,7 +633,8 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     if (container) observer.observe(container);
     window.addEventListener("resize", requestDraw);
     document.addEventListener("fullscreenchange", requestDraw);
-    document.addEventListener("visibilitychange", requestDraw);
+    const visibility=()=>{if(document.visibilityState==='hidden'&&fadeOwnerRef.current?.isActive){++fadePlayIntent.current;fadePreparing.current=false;fadeOwnerRef.current.pause();isPlayingRef.current=false;setIsPlaying(false);}requestDraw();};
+    document.addEventListener("visibilitychange", visibility);
     audio?.addEventListener("loadeddata", syncAudio);
     audio?.addEventListener("seeked", syncAudio);
     frames.invalidate();
@@ -579,7 +644,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
       observer.disconnect();
       window.removeEventListener("resize", requestDraw);
       document.removeEventListener("fullscreenchange", requestDraw);
-      document.removeEventListener("visibilitychange", requestDraw);
+      document.removeEventListener("visibilitychange", visibility);
       audio?.removeEventListener("loadeddata", syncAudio);
       audio?.removeEventListener("seeked", syncAudio);
       for (const remove of listeners.values()) remove();
@@ -840,6 +905,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
         onPointerMove={onWrapPointerMove}
         onPointerLeave={onWrapPointerLeave}
       >
+        {fadeError&&<p role="alert" className="title-preview-status">{fadeError}<button type="button" onClick={()=>{const owner=fadeOwnerRef.current;if(owner)void owner.reset().then(()=>{setFadeError(null);}).catch(e=>setFadeError(String(e)));}}>音声フェードを再試行</button></p>}
         {titleImages.status&&<p role="status" className="title-preview-status">{titleImages.status}{titleImages.status!=="タイトルを生成中…"&&<button type="button" onClick={titleImages.retry}>タイトル表示を再試行</button>}</p>}
       <canvas
           ref={canvasRef}

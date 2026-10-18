@@ -35,7 +35,7 @@ it("v3 roundtrip preserves nondefault/tiny/inactive gain, default writer remains
 it("old versions reject any new property and v3 strictly validates values/unknownversion",()=>{
  const p=fixture();for(const version of [1,2] as const)for(const gain of [undefined,1,0]){const doc=projectDocumentDraft(p);doc.version=version;doc.project.clips[0].audioGain=gain;expect(()=>parseProjectDocument(doc)).toThrow();}
  for(const gain of [null,".5",NaN,-1,1.01]){const doc=projectDocumentDraft(p);doc.version=3;Object.assign(doc.project.clips[0],{audioGain:gain});expect(()=>parseProjectDocument(doc)).toThrow();}
- const doc=projectDocumentDraft(p);expect(()=>parseProjectDocument({...doc,version:5})).toThrow();
+ const doc=projectDocumentDraft(p);expect(()=>parseProjectDocument({...doc,version:6})).toThrow();
  const c={...p.clips[0],audioGain:null};expect(()=>parseClip(c,0,new Set(p.tracks.map(t=>t.id)),new Set(p.assets.map(a=>a.id)),30)).toThrow();
 });
 it("split/duplicate preserve gain, video merge ignores inactive images and rejects different video gains",()=>{

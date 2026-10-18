@@ -49,7 +49,7 @@ it("title-only v4 roundtrips without fake asset/parts/cache; old versions reject
  old.clips[0].layoutMode = "contain"; expect(projectDocumentDraft(old).version).toBe(2);
  old.clips[0].audioGain = .5; expect(projectDocumentDraft(old).version).toBe(3);
  expect(projectDocumentDraft(title(old)).version).toBe(4);
- expect(() => parseProjectDocument({...doc,version:5})).toThrow();
+ expect(() => parseProjectDocument({...doc,version:6})).toThrow();
 });
 it("one title edit is one Undo/Redo, no-op/invalid keep source and Redo; split/duplicate/move/resize preserve source", () => {
  const p = title(), id = p.clips[0].id, h = createCommandHistory(p);
