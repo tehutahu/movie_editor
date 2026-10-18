@@ -59,3 +59,9 @@ it("explicit placement ignores zoom-only changes and rejects a second stale queu
  expect(current.timelineZoom).toBe(2);expect(current.project.clips.map(c=>c.timelineStartSec)).toEqual([0,2]);
  expect(current.project.playheadSec).toBe(0);expect((harness.cells[0].value as CommandHistory).undoStack).toHaveLength(2);
 });
+it("content-duration adopts latest queued view position and rejects a later playback intent",()=>{
+ let editor=setup();const old=editor.project;let stopped=true;
+ editor.setPlayheadSec(5);editor.fitContentDuration(()=>stopped);let current=render();
+ expect(current.project.compositionDurationSec).toBe(4);expect(current.project.playheadSec).toBe(4);expect(current.project.clips).toBe(old.clips);expect((harness.cells[0].value as CommandHistory).undoStack).toHaveLength(2);
+ editor=setup();editor.fitContentDuration(()=>stopped);stopped=false;current=render();expect(current.project).toBe(editor.project);
+});
