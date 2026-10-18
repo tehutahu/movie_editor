@@ -1,4 +1,4 @@
-/* global document, KeyboardEvent, CompositionEvent, innerWidth, innerHeight */
+/* global document, KeyboardEvent, CompositionEvent, innerWidth, innerHeight, requestAnimationFrame */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import console from 'node:console';
@@ -119,7 +119,15 @@ const check = (name, value = true) => {
   check('fullscreen exit discards draft', await input.inputValue() === '2.125');
   for (const [width, height] of [[1440, 1000], [1280, 720]]) {
     await page.setViewportSize({ width, height });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     check(`${width}x${height} input and controls remain within viewport`, await input.evaluate(el => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
+    for (const target of [input, move]) {
+      check(`${width}x${height} ${await target.getAttribute('aria-label') || await target.textContent() || 'seek input'} is reachable after layout settles`, await target.evaluate(el => {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return !!hit && el.contains(hit);
+      }));
+    }
     await captureEvidenceScreenshot(page, `${evidence}/${width}x${height}.png`);
   }
   fs.writeFileSync(`${evidence}/reload.json`, JSON.stringify(saved));

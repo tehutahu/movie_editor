@@ -55,6 +55,7 @@ function compositionPresetId(width: number, height: number): string {
 export function EditorShell({ editor }: { editor: EditorStore }) {
   const {
     project,
+    projectEpoch,
     setExportBaseName,
     setCompositionSize,
     matchCompositionToSelectedClip,
@@ -97,11 +98,21 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
     syncHeights();
     const ro = new ResizeObserver(syncHeights);
     ro.observe(shell);
-    // Width, validation hints and fullscreen can change control wrapping without
-    // changing the fixed outer shell height.
-    for (const element of shell.querySelectorAll(".editor-project-bar, .preview-transport, .compositor-canvas-wrap")) ro.observe(element);
-    return () => ro.disconnect();
-  }, [clampWorkspaceHeight, timelineHeightPx]);
+    let observedControls = new Set<Element>();
+    const observeControls = () => {
+      const current = new Set(shell.querySelectorAll(".editor-project-bar, .preview-transport, .compositor-canvas-wrap"));
+      for (const element of observedControls) if (!current.has(element)) ro.unobserve(element);
+      for (const element of current) if (!observedControls.has(element)) ro.observe(element);
+      observedControls = current;
+      syncHeights();
+    };
+    observeControls();
+    // Load epochs and fullscreen replace preview/transport nodes. Observe new
+    // controls too; pane style changes and playback text updates are not watched.
+    const mutations = new MutationObserver(observeControls);
+    mutations.observe(shell.querySelector(".editor-center-col") ?? shell, { childList: true, subtree: true });
+    return () => { mutations.disconnect(); ro.disconnect(); };
+  }, [clampWorkspaceHeight, timelineHeightPx, projectEpoch]);
 
   const onSplitPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
