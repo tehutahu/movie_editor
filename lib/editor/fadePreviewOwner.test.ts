@@ -82,13 +82,31 @@ describe('dedicated preview fade ownership',()=>{
   const {owner,dedicated}=setup();await owner.prepare();let finish!:()=>void;dedicated[0].play=vi.fn(()=>new Promise<void>(resolve=>{finish=()=>{dedicated[0].paused=false;resolve();};}));
   owner.sync(request,true);const context=Context.instances[0];context.currentTime=10.02;vi.mocked(performance.now).mockReturnValue(1020);owner.observeTimeline(request.key,.1,1020);dedicated[0].currentTime=2;finish();await Promise.resolve();expect(context.param.setValueAtTime).toHaveBeenLastCalledWith(expect.closeTo(.1,10),10.02);await owner.destroy();
  });
+ it('uses each fresh output estimate unchanged when its context position moves backwards',async()=>{
+  const {owner,dedicated,error}=setup();await owner.prepare();const context=Context.instances[0];
+  const first={contextTime:.00011300000000000001,performanceTime:1774.300000000745};
+  const next={contextTime:.000078,performanceTime:1782.9000000003725};
+  context.currentTime=.03192743764172336;context.timestamp=first;vi.mocked(performance.now).mockReturnValue(1783.6);
+  const anchor={...request,performanceMs:1783.6};owner.sync(anchor,true);await Promise.resolve();
+  context.currentTime=.040634920634920635;context.timestamp=next;vi.mocked(performance.now).mockReturnValue(1791.2);
+  dedicated[0].dispatchEvent(new Event('playing'));
+  expect(error).not.toHaveBeenCalled();expect(owner.isActive).toBe(true);expect(dedicated[0].paused).toBe(false);
+  const u=(next.performanceTime+1000*(context.currentTime-next.contextTime)-anchor.performanceMs)/1000;
+  expect(context.param.setValueAtTime).toHaveBeenLastCalledWith(u,context.currentTime);
+  expect(context.param.linearRampToValueAtTime).toHaveBeenLastCalledWith(0,next.contextTime+(anchor.performanceMs+4000-next.performanceTime)/1000);
+  expect(context.timestamp).toEqual(next);await owner.destroy();
+ });
+ it('accepts a fresh zero context position with a positive performance time',async()=>{
+  const {owner,error}=setup();await owner.prepare();const context=Context.instances[0];context.timestamp={contextTime:0,performanceTime:1000};context.currentTime=.02;
+  owner.sync(request,true);await Promise.resolve();expect(error).not.toHaveBeenCalled();expect(owner.isActive).toBe(true);expect(context.param.setValueAtTime).toHaveBeenLastCalledWith(.02,.02);await owner.destroy();
+ });
  it('waits silently for an initial zero timestamp and cancels readiness on pause',async()=>{
   vi.useFakeTimers({toFake:['setTimeout','clearTimeout']});const {owner,error}=setup();await owner.prepare();const context=Context.instances[0];context.timestamp={contextTime:0,performanceTime:0};owner.sync(request,true);await Promise.resolve();expect(context.param.setValueAtTime).toHaveBeenLastCalledWith(0,10);
   owner.pause();await vi.advanceTimersByTimeAsync(600);expect(error).not.toHaveBeenCalled();context.timestamp={contextTime:10,performanceTime:1000};owner.sync(request,true);await Promise.resolve();expect(owner.isActive).toBe(true);await owner.destroy();
  });
- it('bounds startup waiting and rejects missing, nonfinite, stale or regressing output clocks',async()=>{
+ it('bounds startup waiting and rejects missing, nonfinite, stale or regressing performance clocks',async()=>{
   vi.useFakeTimers({toFake:['setTimeout','clearTimeout']});let s=setup();await s.owner.prepare();Context.instances[0].timestamp={contextTime:0,performanceTime:0};s.owner.sync(request,true);await vi.advanceTimersByTimeAsync(600);expect(s.error).toHaveBeenCalledTimes(1);expect(s.owner.isActive).toBe(false);await s.owner.destroy();vi.restoreAllMocks();
-  for(const timestamp of [{contextTime:NaN,performanceTime:1000},{contextTime:-1,performanceTime:1000},{contextTime:10,performanceTime:-1},{contextTime:10,performanceTime:800},{contextTime:10,performanceTime:1200}]){s=setup();await s.owner.prepare();Context.instances[0].timestamp=timestamp;s.owner.sync(request,true);expect(s.error).toHaveBeenCalledTimes(1);expect(s.dedicated[0].paused).toBe(true);await s.owner.destroy();vi.restoreAllMocks();}
+  for(const timestamp of [{contextTime:NaN,performanceTime:1000},{contextTime:Infinity,performanceTime:1000},{contextTime:10,performanceTime:Infinity},{contextTime:10.01,performanceTime:1000},{contextTime:-1,performanceTime:1000},{contextTime:10,performanceTime:-1},{contextTime:10,performanceTime:800},{contextTime:10,performanceTime:1200}]){s=setup();await s.owner.prepare();Context.instances[0].timestamp=timestamp;s.owner.sync(request,true);expect(s.error).toHaveBeenCalledTimes(1);expect(s.dedicated[0].paused).toBe(true);await s.owner.destroy();vi.restoreAllMocks();}
   s=setup();await s.owner.prepare();Object.defineProperty(Context.instances[0],'getOutputTimestamp',{value:undefined});s.owner.sync(request,true);expect(s.error).toHaveBeenCalledTimes(1);await s.owner.destroy();vi.restoreAllMocks();
   s=setup();await s.owner.prepare();s.owner.sync(request,true);await Promise.resolve();Context.instances[0].timestamp={contextTime:9.9,performanceTime:999};s.dedicated[0].dispatchEvent(new Event('playing'));expect(s.error).toHaveBeenCalledTimes(1);await s.owner.destroy();
  });

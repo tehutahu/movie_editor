@@ -80,7 +80,7 @@ export class FadePreviewOwner {
         const token=this.generation;this.outputAttempts++;
         this.outputTimer=setTimeout(()=>{this.outputTimer=null;if(token===this.generation)this.scheduleLatest();},16);return;
       }
-      if(![stamp.contextTime,stamp.performanceTime,wall].every(Number.isFinite)||Math.abs(wall-stamp.performanceTime)>100||this.lastOutput&&(stamp.contextTime<this.lastOutput.contextTime||stamp.performanceTime<this.lastOutput.performanceTime))throw Error('音声フェードの出力時計が無効または古くなっています。');
+      if(![stamp.contextTime,stamp.performanceTime,wall].every(Number.isFinite)||Math.abs(wall-stamp.performanceTime)>100||this.lastOutput&&(stamp.performanceTime<this.lastOutput.performanceTime))throw Error('音声フェードの出力時計が無効または古くなっています。');
       const now=context.currentTime,u=outputTimelinePosition(request,stamp,now),gain=this.gain!.gain,f=request.fade;
       this.lastOutput={...stamp};this.cancelOutputWait();
       gain.cancelScheduledValues(now);gain.setValueAtTime(fadeEnvelope(f,u),now);
