@@ -64,6 +64,7 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
     setSampleRateHz,
   } = editor;
 
+  const selectedTitle=project.clips.some(c=>project.selectedClipIds.includes(c.id)&&c.kind==="title");
   const trimReasonId = useId();
   const trimSnapshot = trimStartSnapshot(project, editor.projectEpoch);
   const trimReason = busy || editor.persistence.locked ? "処理が終わってから操作してください。" : trimStartReason(project);
@@ -93,7 +94,7 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
         <button type="button" onClick={redoEdit} disabled={!canRedoEdit} title="Redo (Shift+Ctrl+Z)">
           ↷
         </button>
-        <button type="button" onClick={mergeSelected} disabled={Boolean(busy)} title="結合 (Ctrl+M)">
+        <button type="button" onClick={mergeSelected} disabled={Boolean(busy)||selectedTitle} title={selectedTitle?"タイトルを含む選択は結合できません。":"結合 (Ctrl+M)"}>
           ⧉
         </button>
         <button type="button" onClick={deleteSelected} disabled={Boolean(busy)} title="削除 (Delete)">
@@ -110,8 +111,8 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
         <button
           type="button"
           onClick={() => void downloadSelectedClip()}
-          disabled={Boolean(busy) || Boolean(clipExportBusyId)}
-          title="選択クリップの素材切り出し。位置・拡大率は適用しません。単一動画は原寸、画像・結合クリップは先頭素材の画面内で配置モードを適用します (Shift+Ctrl+E)"
+          disabled={Boolean(busy) || Boolean(clipExportBusyId)||selectedTitle}
+          title={selectedTitle?"タイトルを含む選択では素材DLできません。全体書き出しを使用してください。":"選択クリップの素材切り出し。位置・拡大率は適用しません。単一動画は原寸、画像・結合クリップは先頭素材の画面内で配置モードを適用します (Shift+Ctrl+E)"}
         >
           ⬇
         </button>
@@ -125,7 +126,7 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
         </button>
         <label title="素材の全体を枠内に収めます。余白は透明です。全体書き出しに配置枠を反映します。">
           配置
-          <select aria-label="クリップの配置" disabled={Boolean(busy) || editor.layoutChecking || project.selectedClipIds.length === 0}
+          <select aria-label="クリップの配置" disabled={Boolean(busy) || editor.layoutChecking || selectedTitle || project.selectedClipIds.length === 0}
             value={(() => { const modes = new Set(project.clips.filter(c => project.selectedClipIds.includes(c.id)).map(c => c.layoutMode ?? "stretch")); return modes.size === 1 ? [...modes][0] : "mixed"; })()}
             onChange={e => { if (e.target.value !== "mixed") void editor.setSelectedLayoutMode(e.target.value as "stretch" | "contain"); }}>
             <option value="mixed" disabled>混在 / 未選択</option>
@@ -140,7 +141,7 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
       </div>
       <div className="timeline-toolbar-right">
         <div className="timeline-speed-restore-group">
-          <button type="button" onClick={() => void restoreSpeedForSelected()} disabled={Boolean(busy)}>
+          <button type="button" onClick={() => void restoreSpeedForSelected()} disabled={Boolean(busy)||selectedTitle} title={selectedTitle?"タイトルは速度復元できません。":undefined}>
             速度復元
           </button>
           <label className="speed-restore-field" title="速度係数">
@@ -601,8 +602,8 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
                   <div
                     key={clip.id}
                     data-clip-id={clip.id}
-                    aria-label={`${asset?.displayName ?? "clip"}${selected ? "（選択中）" : ""}`}
-                    className={`timeline-clip${groupPlan?.reason && st.dragging ? " timeline-clip--invalid-move" : ""}${selected ? " timeline-clip--selected" : ""}${asset?.kind === "image" ? " timeline-clip--image" : ""}${st.dragging ? " timeline-clip--dragging" : ""}`}
+                    aria-label={`${clip.kind==="title"?`タイトル：${clip.text.split("\n")[0]}`:asset?.displayName ?? "clip"}${selected ? "（選択中）" : ""}`}
+                    className={`timeline-clip${groupPlan?.reason && st.dragging ? " timeline-clip--invalid-move" : ""}${selected ? " timeline-clip--selected" : ""}${asset?.kind === "image" ? " timeline-clip--image" : clip.kind==="title"?" timeline-clip--title":""}${st.dragging ? " timeline-clip--dragging" : ""}`}
                     style={{
                       left: secToPx(st.startSec, pps) + 48,
                       width: secToPx(st.durationSec, pps),
@@ -613,7 +614,7 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
                     }}
                     onPointerDown={(e) => onPointerDownClip(e, clip.id, "move")}
                   >
-                    <span className="timeline-clip-label">{asset?.displayName ?? "clip"}</span>
+                    <span className="timeline-clip-label">{clip.kind==="title"?`タイトル：${clip.text.split("\n")[0]}`:asset?.displayName ?? "clip"}</span>
                     <div
                       className="timeline-clip-resize"
                       onPointerDown={(e) => onPointerDownClip(e, clip.id, "resize")}

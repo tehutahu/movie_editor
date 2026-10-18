@@ -1,5 +1,6 @@
 import { isMediaClip, type MediaClip } from "./editor/types";
 import { audioGainFilter } from "@/lib/editor/clipAudio";
+import { copyTitleRaster } from "./titleRenderer";
 /** Opt-in layout renderer. All-stretch compositions use the unchanged legacy renderer. */
 import path from "node:path";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
@@ -10,7 +11,7 @@ import { repairContainAudio } from "@/lib/containAudioRepair";
 import { renderClipToFile } from "@/lib/renderClip";
 import type { Asset, Clip, EditorProject } from "@/lib/editor/types";
 import { clipsForExportComposition, compositionFrameAt, COMPOSITION_BG_FFMPEG, MAX_CLIP_SCALE,
-  resolveAudioTrackForExport, resolveContainContentRect, transformToPixelRect } from "@/lib/editor/compositor";
+  resolveAudioTrackForExport, resolveContainContentRect, transformToPixelRect, visualClipsForExport } from "@/lib/editor/compositor";
 
 function num(n: number): string {
   if (!Number.isFinite(n) || Math.abs(n) > 100_000_000) throw new Error("配置の数値が不正です。");
@@ -40,7 +41,7 @@ async function concat(files: string[], output: string, video: boolean, durations
   await Promise.all([...files, manifest].map(p => unlink(p)));
 }
 
-type Prepared = { file: string; clip: Clip; matte: boolean; audio: boolean; rect: ReturnType<typeof rectFor> };
+type Prepared = { file: string; clip: Clip; matte: boolean; audio: boolean; title?: boolean; rect: ReturnType<typeof rectFor> };
 async function prepareContain(clip: MediaClip, project: EditorProject, dir: string, ci: number, audio: boolean): Promise<Prepared> {
   const rect = rectFor(clip, project), videos: string[] = [], durations: number[] = [], audios: string[] = [];
   let offset = clip.timelineStartSec;
@@ -100,7 +101,12 @@ export async function exportLayoutCompositionToFile(params: { project: EditorPro
   try {
     const prepared: Prepared[] = [];
     const audioTrack = resolveAudioTrackForExport(project);
-    for (const [ci, { clip }] of clipsForExportComposition(project).entries()) {
+    const layers=project.clips.some(c=>c.kind==="title")?visualClipsForExport(project).map(clip=>({clip})):clipsForExportComposition(project);
+    for (const [ci, { clip }] of layers.entries()) {
+      if(clip.kind==="title"){
+        const file=await copyTitleRaster(clip,project.compositionWidth,project.compositionHeight,dir);
+        prepared.push({file,clip,title:true,matte:false,audio:false,rect:transformToPixelRect({...clip.transform,x:Math.max(-MAX_CLIP_SCALE,Math.min(1+MAX_CLIP_SCALE,clip.transform.x)),y:Math.max(-MAX_CLIP_SCALE,Math.min(1+MAX_CLIP_SCALE,clip.transform.y))},project.compositionWidth,project.compositionHeight,1)});continue;
+      }
       const audio = clip.trackId === audioTrack?.id;
       if (clip.layoutMode === "contain") prepared.push(await prepareContain(clip, project, dir, ci, audio));
       else {
@@ -117,6 +123,7 @@ export async function exportLayoutCompositionToFile(params: { project: EditorPro
     const audioLabels: string[] = [];
     for (const [i, p] of prepared.entries()) {
       const j = i + 1, start = num(p.clip.timelineStartSec), end = num(p.clip.timelineStartSec + p.clip.durationSec);
+      if(p.title)args.push("-loop","1","-framerate","30");
       args.push("-i", p.file);
       if (p.matte) {
         filters.push(`[${j}:v:0]settb=1/30,setpts=N+${compositionFrameAt(p.clip.timelineStartSec)}[c${i}]`,

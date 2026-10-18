@@ -13,11 +13,13 @@ export function fontCoverageRanges(bytes: Uint8Array): [number, number][] {
   const face = u32(12); bound(face, 12);
   const n = u16(face + 4); if (!n || n > 256) throw new Error("font table数が不正です。");
   bound(face + 12, n * 16);
-  let cmap = -1, cmapEnd = -1;
+  let cmap = -1, cmapEnd = -1, glyphCount = 0;
   for (let i = 0; i < n; i++) {
     const o = face + 12 + i * 16, offset = u32(o + 8), size = u32(o + 12); bound(offset, size);
     if (String.fromCharCode(...bytes.subarray(o, o + 4)) === "cmap") { if (cmap !== -1) throw new Error("重複cmapです。"); cmap = offset; cmapEnd = offset + size; }
+    if (String.fromCharCode(...bytes.subarray(o, o + 4)) === "maxp") { bound(offset,6,offset+size);glyphCount=u16(offset+4); }
   }
+  if(!glyphCount)throw new Error("font glyph数が不正です。");
   bound(cmap, 4, cmapEnd); const maps = u16(cmap + 2); if (maps > 256) throw new Error("cmap数が不正です。");
   bound(cmap + 4, maps * 8, cmapEnd);
   let selected: { o: number; format: number; end: number } | undefined;
@@ -36,7 +38,7 @@ export function fontCoverageRanges(bytes: Uint8Array): [number, number][] {
     let previous = -1;
     for (let i = 0; i < groups; i++) {
       const a = o + 16 + i * 12, first = u32(a), last = u32(a + 4), gid = u32(a + 8);
-      if (first > last || first <= previous || last > 0x10ffff || gid + last - first > 65535) throw new Error("cmap範囲が不正です。");
+      if (first > last || first <= previous || last > 0x10ffff || gid + last - first >= glyphCount) throw new Error("cmap範囲が不正です。");
       previous = last; if (gid || last > first) points.push([first + (gid ? 0 : 1), last]);
     }
   } else {
@@ -49,6 +51,7 @@ export function fontCoverageRanges(bytes: Uint8Array): [number, number][] {
       for (let cp = first; cp <= last && cp !== 65535; cp++) {
         let gid = (cp + delta) & 65535;
         if (ro) { const at = offsets + i * 2 + ro + (cp - first) * 2; bound(at, 2, end); const g = u16(at); gid = g ? (g + delta) & 65535 : 0; }
+        if(gid>=glyphCount)throw new Error("cmap glyph IDが不正です。");
         if (gid) points.push([cp, cp]);
       }
     }

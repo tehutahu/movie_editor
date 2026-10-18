@@ -6,7 +6,7 @@ export const TITLE_FONT_ID = "noto-sans-cjk-jp-regular";
 export const TITLE_FONT_REVISION = coverage.fontHash;
 export const TITLE_STYLE_REVISION = "white-outline-centered-v1";
 export const TITLE_TEXT_HELP = "半角のバックスラッシュ・波括弧、絵文字の修飾・異体字指定など未対応の文字列は使用できません。";
-const segmenter = new Intl.Segmenter("ja", { granularity: "grapheme" });
+let segmenter: Intl.Segmenter | undefined;
 function label(c: string) { return `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`; }
 export function titleFontHasScalar(cp: number): boolean {
   let l = 0, h = coverage.ranges.length - 1;
@@ -21,6 +21,8 @@ export function validateTitleText(raw: unknown): string {
   if (reserved) throw new Error(`タイトルでは半角のバックスラッシュと波括弧は使用できません（${label(reserved)}）。`);
   if (!text.trim()) throw new Error("タイトル本文を入力してください。");
   if (new TextEncoder().encode(text).length > 4096 || [...text].length > 1024 || text.split("\n").length > 8) throw new Error("タイトルは4096 bytes・1024文字・8行以内で入力してください。");
+  if(typeof Intl.Segmenter!=="function")throw new Error("この環境ではタイトル文字列の検証を利用できません。");
+  segmenter??=new Intl.Segmenter("ja", { granularity: "grapheme" });
   for (const { segment } of segmenter.segment(text)) if (/^\p{M}/u.test(segment)) throw new Error(`結合文字には直前の基底文字が必要です（${label(segment)}）。`);
   for (const c of text) {
     if (c === "\n") continue;
@@ -55,3 +57,9 @@ export function updateTitle(project: EditorProject, id: string, text: string): E
   if (clip?.kind !== "title" || clip.text === descriptor.text) return null;
   return { ...project, clips: project.clips.map((c): Clip => c.id === id ? { ...clip, ...descriptor } : c) };
 }
+export type TitleEditSnapshot = { epoch:number; id:string; identity:string };
+export function titleEditSnapshot(project:EditorProject,epoch:number):TitleEditSnapshot|null{
+ if(project.selectedClipIds.length!==1)return null;const clip=project.clips.find(c=>c.id===project.selectedClipIds[0]);if(clip?.kind!=="title")return null;
+ return{epoch,id:clip.id,identity:JSON.stringify({clip,width:project.compositionWidth,height:project.compositionHeight})};
+}
+export function matchesTitleEditSnapshot(project:EditorProject,epoch:number,snapshot:TitleEditSnapshot){const now=titleEditSnapshot(project,epoch);return now?.epoch===snapshot.epoch&&now.id===snapshot.id&&now.identity===snapshot.identity;}

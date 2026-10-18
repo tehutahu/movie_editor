@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  outputFileTracingIncludes: { "/api/**/*": ["./vendor/fonts/noto-sans-cjk/**/*"] },
   serverExternalPackages: ["ffmpeg-static", "ffprobe-static"],
   async headers() {
     return [

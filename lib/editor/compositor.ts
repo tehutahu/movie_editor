@@ -83,9 +83,10 @@ export function transformToPixelRect(
   transform: ClipTransform,
   compW: number,
   compH: number,
+  baseRatio = BASE_DRAW_WIDTH_RATIO,
 ): PixelRect {
-  const drawW = compW * BASE_DRAW_WIDTH_RATIO * transform.scale;
-  const drawH = compH * BASE_DRAW_HEIGHT_RATIO * transform.scale;
+  const drawW = compW * baseRatio * transform.scale;
+  const drawH = compH * baseRatio * transform.scale;
   const cx = transform.x * compW;
   const cy = transform.y * compH;
   return {
@@ -140,15 +141,15 @@ export function resolveAudioTrackForExport(project: EditorProject): Track | unde
   return undefined;
 }
 
-export function clipTransformHalfExtents(scale: number): { halfW: number; halfH: number } {
+export function clipTransformHalfExtents(scale: number, baseRatio = BASE_DRAW_WIDTH_RATIO): { halfW: number; halfH: number } {
   return {
-    halfW: BASE_DRAW_WIDTH_RATIO * scale * 0.5,
-    halfH: BASE_DRAW_HEIGHT_RATIO * scale * 0.5,
+    halfW: baseRatio * scale * 0.5,
+    halfH: baseRatio * scale * 0.5,
   };
 }
 
-export function clipContainsNormPoint(transform: ClipTransform, nx: number, ny: number): boolean {
-  const { halfW, halfH } = clipTransformHalfExtents(transform.scale);
+export function clipContainsNormPoint(transform: ClipTransform, nx: number, ny: number, baseRatio = BASE_DRAW_WIDTH_RATIO): boolean {
+  const { halfW, halfH } = clipTransformHalfExtents(transform.scale, baseRatio);
   return (
     nx >= transform.x - halfW &&
     nx <= transform.x + halfW &&
@@ -164,8 +165,9 @@ export function hitTestTransformHandle(
   canvasW: number,
   canvasH: number,
   handleRadiusPx = 8,
+  baseRatio = BASE_DRAW_WIDTH_RATIO,
 ): TransformHandle | null {
-  const { halfW, halfH } = clipTransformHalfExtents(transform.scale);
+  const { halfW, halfH } = clipTransformHalfExtents(transform.scale, baseRatio);
   const corners: { h: TransformHandle; x: number; y: number }[] = [
     { h: "nw", x: transform.x - halfW, y: transform.y - halfH },
     { h: "ne", x: transform.x + halfW, y: transform.y - halfH },
@@ -198,9 +200,10 @@ export function transformFromResize(
   pointerPx: { x: number; y: number },
   canvasW: number,
   canvasH: number,
+  baseRatio = BASE_DRAW_WIDTH_RATIO,
 ): ClipTransform {
-  const bw = canvasW * BASE_DRAW_WIDTH_RATIO;
-  const bh = canvasH * BASE_DRAW_HEIGHT_RATIO;
+  const bw = canvasW * baseRatio;
+  const bh = canvasH * baseRatio;
   const { x, y, scale } = orig;
   const drawW = bw * scale;
   const drawH = bh * scale;
@@ -338,6 +341,15 @@ export function hitTestClipAtPoint(
 export function trackAtIndex(tracks: readonly Track[], index: number): Track | undefined {
   const sorted = tracksSortedForPreview(tracks);
   return sorted[index];
+}
+
+/** Common title/media z ordering without inventing an Asset for a title. */
+export function visualClipsForExport(project: EditorProject): Clip[] {
+  const orders = new Map(project.tracks.map(t=>[t.id,t.order]));
+  return [...project.clips].sort((a,b)=>(orders.get(b.trackId)??0)-(orders.get(a.trackId)??0)||b.timelineStartSec-a.timelineStartSec);
+}
+export function activeVisualClips(project: EditorProject): { clip: Clip }[] {
+  return visualClipsForExport(project).filter(c=>getClipAtPlayhead(c,project.playheadSec)).map(clip=>({clip}));
 }
 
 /** Shared, composition-pixel geometry for opt-in contain. Old stretch is untouched. */

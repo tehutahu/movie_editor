@@ -190,7 +190,7 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
                   </select>
                   <button
                     type="button"
-                    disabled={Boolean(busy) || project.selectedClipIds.length === 0}
+                    disabled={Boolean(busy) || project.selectedClipIds.length === 0||project.clips.some(c=>project.selectedClipIds.includes(c.id)&&c.kind==="title")}
                     onClick={() => matchCompositionToSelectedClip()}
                     title="選択中クリップの素材解像度に合わせる"
                   >

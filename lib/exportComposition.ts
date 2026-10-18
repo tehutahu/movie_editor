@@ -1,4 +1,5 @@
 import { audioGainFilter } from "@/lib/editor/clipAudio";
+import { copyTitleRaster } from "./titleRenderer";
 import { exportLayoutCompositionToFile } from "@/lib/exportLayoutComposition";
 import type { Asset, Clip, EditorProject, Track } from "@/lib/editor/types";
 import {
@@ -8,11 +9,12 @@ import {
   getCompositionSize,
   resolveAudioTrackForExport,
   transformToPixelRect,
+  visualClipsForExport,
 } from "@/lib/editor/compositor";
 import { MAX_COMPOSITION_DURATION_SEC } from "@/lib/editor/validateExportProject";
 import { probeVideo, runFfmpegCommand } from "@/lib/ffmpeg";
 import { renderClipToFile } from "@/lib/renderClip";
-import { unlink } from "node:fs/promises";
+import { unlink, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 
 const MAX_FFMPEG_FILTER_INT = 100_000;
@@ -48,6 +50,7 @@ type PreparedClip = {
   path: string;
   clip: Clip;
   inputIndex: number;
+  title?: boolean;
   rect: ReturnType<typeof transformToPixelRect>;
 };
 
@@ -56,12 +59,19 @@ async function prepareCompositionClips(
   jobDir: string,
   compW: number,
   compH: number,
+  titleDir?: string,
 ): Promise<PreparedClip[]> {
-  const sorted = clipsForExportComposition(project);
+  const sorted = titleDir ? visualClipsForExport(project).map(clip=>({clip})) : clipsForExportComposition(project);
   const prepared: PreparedClip[] = [];
   let partIndex = 0;
 
   for (const { clip } of sorted) {
+    if (clip.kind === "title") {
+      if(!titleDir)throw new Error("タイトルexport stagingがありません。");
+      const rendered=await copyTitleRaster(clip,compW,compH,titleDir);
+      prepared.push({path:rendered,clip,title:true,inputIndex:prepared.length+1,rect:transformToPixelRect({...clip.transform,x:Math.max(-MAX_CLIP_SCALE,Math.min(1+MAX_CLIP_SCALE,clip.transform.x)),y:Math.max(-MAX_CLIP_SCALE,Math.min(1+MAX_CLIP_SCALE,clip.transform.y))},compW,compH,1)});
+      continue;
+    }
     const rendered = path.join(jobDir, `part_${partIndex++}.mp4`);
     await renderClipToFile({ clip, assets: project.assets, jobDir,
       outputPath: rendered, width: compW, height: compH });
@@ -126,7 +136,7 @@ async function buildCompositionAudioFilterGraph(
   const audioLabels: string[] = [];
 
   for (const p of prepared) {
-    if (!audioClipIds.has(p.clip.id)) continue;
+    if (p.title || !audioClipIds.has(p.clip.id)) continue;
 
     const probe = await probeVideo(p.path);
     if (!probe.hasAudio) continue;
@@ -164,7 +174,9 @@ export async function exportCompositionToFile(params: {
   const duration = project.compositionDurationSec;
   const fps = 30;
 
-  const prepared = await prepareCompositionClips(project, jobDir, compW, compH);
+  const titleDir=project.clips.some(c=>c.kind==="title")?await mkdtemp(path.join(jobDir,"titles-")):undefined;
+  try {
+  const prepared = await prepareCompositionClips(project, jobDir, compW, compH,titleDir);
   if (prepared.length === 0) {
     throw new Error("書き出すクリップがありません。");
   }
@@ -184,6 +196,7 @@ export async function exportCompositionToFile(params: {
     `color=c=${COMPOSITION_BG_FFMPEG}:s=${compW}x${compH}:d=${formatFfmpegFilterNumber(duration)}:r=${fps}`,
   ];
   for (const p of prepared) {
+    if(p.title)args.push("-loop","1","-framerate","30");
     args.push("-i", p.path);
   }
 
@@ -217,6 +230,7 @@ export async function exportCompositionToFile(params: {
   for (const p of prepared) {
     await unlink(p.path).catch(() => undefined);
   }
+  }finally{if(titleDir)await rm(titleDir,{recursive:true,force:true});}
 }
 
 export type CompositionExportPayload = {

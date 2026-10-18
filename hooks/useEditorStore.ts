@@ -1,6 +1,7 @@
 "use client";
 
 import { isMediaClip } from "@/lib/editor/types";
+import { validateTitleText, titleDescriptor, matchesTitleEditSnapshot, type TitleEditSnapshot } from "@/lib/editor/title";
 
 import { useRestoreInputAudio } from "@/hooks/useRestoreInputAudio";
 import { matchesClipAudioSnapshot, mergedAudioGain, type ClipAudioSnapshot } from "@/lib/editor/clipAudio";
@@ -491,10 +492,39 @@ export function useEditorStore() {
     if (areEditorShortcutsBlocked()) return;
     setHistory(h => {
       const current = getCurrentProject(h);
+      if (current.clips.some(c=>current.selectedClipIds.includes(c.id)&&!isMediaClip(c))) return h;
       if (areEditorShortcutsBlocked() || !matchesClipAudioSnapshot(current, projectEpochRef.current, snapshot)) return h;
       return dispatchCommand(h, { type: "audioGain", clipIds: snapshot.clipIds, gain })?.history ?? h;
     });
   }, [areEditorShortcutsBlocked]);
+
+  const titleRequestRef=useRef<AbortController|null>(null);
+  useEffect(()=>()=>{titleRequestRef.current?.abort();},[projectEpoch]);
+  const preflightTitle=useCallback(async(text:string,current:EditorProject)=>{
+    titleRequestRef.current?.abort();const controller=new AbortController();titleRequestRef.current=controller;
+    const response=await fetch("/api/titles/raster",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...titleDescriptor(text),width:current.compositionWidth,height:current.compositionHeight}),signal:controller.signal});
+    if(!response.ok){const json=await response.json();throw new Error(json.error??"タイトル生成に失敗しました。");}
+    await response.body?.cancel();
+    return controller;
+  },[]);
+  const addTitleClip=useCallback(async()=>{
+    if(areEditorShortcutsBlocked())return;
+    const source=latestHistoryRef.current,epoch=projectEpochRef.current,result=dispatchCommand(source,{type:"addTitle",id:newId(),text:"タイトル"});
+    if(!result){setError("タイトルを追加できません。前面トラック・上限20トラック/100クリップ・再生位置を確認してください。");return;}
+    try{const request=await preflightTitle("タイトル",getCurrentProject(source));
+      if(request.signal.aborted)return;
+      setError(null);setHistory(h=>h===source&&epoch===projectEpochRef.current&&!areEditorShortcutsBlocked()&&!request.signal.aborted?result.history:h);
+    }catch(e){if(epoch===projectEpochRef.current&&latestHistoryRef.current===source)setError(e instanceof Error?e.message:String(e));}
+  },[areEditorShortcutsBlocked,preflightTitle]);
+  const applyTitleText=useCallback(async(snapshot:TitleEditSnapshot,raw:string)=>{
+    if(areEditorShortcutsBlocked())return;
+    let text:string;try{text=validateTitleText(raw);}catch(e){setError(e instanceof Error?e.message:String(e));return;}
+    const current=latestProjectRef.current;if(!matchesTitleEditSnapshot(current,projectEpochRef.current,snapshot))return;
+    const old=current.clips.find(c=>c.id===snapshot.id);if(old?.kind==="title"&&old.text===text)return;
+    try{const request=await preflightTitle(text,current);if(request.signal.aborted)return;
+      setHistory(h=>{const latest=getCurrentProject(h);if(request.signal.aborted||areEditorShortcutsBlocked()||!matchesTitleEditSnapshot(latest,projectEpochRef.current,snapshot))return h;return dispatchCommand(h,{type:"titleText",clipId:snapshot.id,text})?.history??h;});
+    }catch(e){if(matchesTitleEditSnapshot(latestProjectRef.current,projectEpochRef.current,snapshot))setError(e instanceof Error?e.message:String(e));}
+  },[areEditorShortcutsBlocked,preflightTitle]);
 
   const resizeClipDuration = useCallback(
     (clipId: string, newDurationSec: number) => {
@@ -543,7 +573,7 @@ export function useEditorStore() {
       const next: EditorProject = {
         ...cur,
         clips: cur.clips.map((c) =>
-          ids.has(c.id) ? { ...c, transform: { ...fit } } : c,
+          ids.has(c.id) ? { ...c, transform: c.kind==="title"?{x:.5,y:.5,scale:1}:{ ...fit } } : c,
         ),
       };
       return { undoStack: [...h.undoStack, next], redoStack: [] };
@@ -932,6 +962,7 @@ export function useEditorStore() {
     moveSelectedClip,
     moveSelectedClips,
     setSelectedAudioGain,
+    addTitleClip,applyTitleText,
     resizeClipDuration,
     updateClipTransform,
     fitSelectedClipsToCanvas,
