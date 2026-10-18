@@ -11,6 +11,7 @@ import { matchesGroupMoveSnapshot, type GroupMoveSnapshot } from "@/lib/editor/m
 import { applyExactSeek } from "@/lib/editor/exactSeek";
 import { applyClipBoundaryNavigation, clipBoundaryTarget, type ClipBoundaryDirection } from "@/lib/editor/clipBoundaryNavigation";
 import { applyMoveSelectionToPlayhead, moveToPlayheadSnapshot } from "@/lib/editor/moveSelectionToPlayhead";
+import { applyContentDuration, contentDurationSnapshot } from "@/lib/editor/contentDuration";
 import { useMoveToPlayheadCapture } from "@/hooks/useMoveToPlayheadCapture";
 import {
   useCallback,
@@ -526,6 +527,13 @@ export function useEditorStore() {
       areEditorShortcutsBlocked(), moveToPlayheadCapture.isActive()));
   }, [areEditorShortcutsBlocked, moveToPlayheadCapture.isActive]);
 
+  const fitContentDuration = useCallback((ownerStopped: () => boolean) => {
+    if (!ownerStopped() || areEditorShortcutsBlocked() || moveToPlayheadCapture.isActive()) return;
+    const snapshot = contentDurationSnapshot(latestHistoryRef.current, projectEpochRef.current);
+    setHistory(current => applyContentDuration(current, snapshot, projectEpochRef.current,
+      !ownerStopped() || areEditorShortcutsBlocked() || moveToPlayheadCapture.isActive()));
+  }, [areEditorShortcutsBlocked, moveToPlayheadCapture.isActive]);
+
   const setSelectedAudioGain = useCallback((snapshot: ClipAudioSnapshot, gain: number) => {
     if (areEditorShortcutsBlocked()) return;
     setHistory(h => {
@@ -996,7 +1004,7 @@ export function useEditorStore() {
 
   return {
     persistence, projectEpoch, getPreviewSeekState, setExactPlayheadSec, getClipBoundaryNavigationState, jumpClipBoundary, areEditorShortcutsBlocked,
-    moveSelectionToPlayhead, moveToPlayheadCaptureActive: moveToPlayheadCapture.active,
+    fitContentDuration, moveSelectionToPlayhead, moveToPlayheadCaptureActive: moveToPlayheadCapture.active,
     project,
     busy,
     error,

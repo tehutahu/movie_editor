@@ -1,3 +1,4 @@
+import { fitContentDuration } from "./contentDuration";
 import { clearClipAudioFade, setClipAudioFade } from "./clipAudioFade";
 import { addTitle, updateTitle } from "./title";
 import { isMediaClip } from "./types";
@@ -30,6 +31,7 @@ export type EditorCommand =
   | { type: "split"; clipId: string; atSec: number }
   | { type: "merge"; clipIds: string[] }
   | { type: "audioGain"; clipIds: string[]; gain: number }
+  | { type: "fitContentDuration" }
   | { type: "moveMany"; clipIds: string[]; deltaSec: number }
   | { type: "move"; clipId: string; newStartSec: number; newTrackId?: string }
   | { type: "resize"; clipId: string; newDurationSec: number }
@@ -56,6 +58,7 @@ export function applyCommand(
   command: EditorCommand,
 ): EditorProject | null {
   switch (command.type) {
+    case "fitContentDuration": return fitContentDuration(project);
     case "audioFade": return setClipAudioFade(project, command.clipId, command.inSec, command.outSec);
     case "clearAudioFade": return clearClipAudioFade(project, command.clipId);
     case "addTitle": return addTitle(project, command.id, command.text);

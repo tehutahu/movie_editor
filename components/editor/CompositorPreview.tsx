@@ -1,4 +1,5 @@
 "use client";
+import { contentDurationOwnerStopped, contentDurationPlan } from "@/lib/editor/contentDuration";
 
 import { useTitleImages, titleImageKey } from "@/hooks/useTitleImages";
 import { activeVisualClips } from "@/lib/editor/compositor";
@@ -204,12 +205,19 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   const fadeTimelineRef=useRef<PublicTimelinePair|null>(null);
   const fadePlayIntent=useRef(0);
   const fadePreparing=useRef(false);
+  const [durationPreparing, setDurationPreparing] = useState(false);
+  // Local duration-action invalidation only; playback clocks and media sync stay unchanged.
+  const durationOwnerAlive = useRef(true);
+  const durationPlayIntent = useRef(0);
+  const durationStartPending = useRef(false);
+  useEffect(() => { durationOwnerAlive.current = true; return () => { durationOwnerAlive.current = false; }; }, []);
+  useLayoutEffect(() => { if (isPlaying) durationStartPending.current = false; }, [isPlaying]);
   const fadeOwnerRef=useRef<FadePreviewOwner|null>(null);
   const [fadeError,setFadeError]=useState<string|null>(null);
   const ensureFadeOwner=useCallback(()=>{
     const native=audioVideoRef.current;
     if(!native)throw Error("音声プレイヤーを準備できません。");
-    if(!fadeOwnerRef.current)fadeOwnerRef.current=new FadePreviewOwner(native,message=>{setFadeError(message);fadeTimelineRef.current=null;++fadePlayIntent.current;fadePreparing.current=false;isPlayingRef.current=false;setIsPlaying(false);});
+    if(!fadeOwnerRef.current)fadeOwnerRef.current=new FadePreviewOwner(native,message=>{setFadeError(message);fadeTimelineRef.current=null;++fadePlayIntent.current;fadePreparing.current=false;durationStartPending.current=false;setDurationPreparing(false);isPlayingRef.current=false;setIsPlaying(false);});
     return fadeOwnerRef.current;
   },[audioVideoRef]);
   useEffect(()=>()=>{fadeTimelineRef.current=null;++fadePlayIntent.current;const owner=fadeOwnerRef.current;fadeOwnerRef.current=null;void owner?.destroy().catch(()=>undefined);},[]);
@@ -261,7 +269,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     lastTickRef.current = null;
     isPlayingRef.current = false;
     playheadSecRef.current = parsed.value;
-    ++fadePlayIntent.current;fadePreparing.current=false;fadeOwnerRef.current?.pause();
+    ++fadePlayIntent.current;fadePreparing.current=false;durationStartPending.current=false;setDurationPreparing(false);fadeOwnerRef.current?.pause();
     setIsPlaying(false);
     editor.setExactPlayheadSec(parsed.value, epoch);
   };
@@ -294,20 +302,30 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     [setPlayheadSec],
   );
   const togglePlay = useCallback(() => {
-    if(isPlayingRef.current||fadePreparing.current){fadeTimelineRef.current=null;++fadePlayIntent.current;fadePreparing.current=false;isPlayingRef.current=false;fadeOwnerRef.current?.pause();setIsPlaying(false);return;}
+    if(isPlayingRef.current||fadePreparing.current){fadeTimelineRef.current=null;++fadePlayIntent.current;fadePreparing.current=false;durationStartPending.current=false;setDurationPreparing(false);isPlayingRef.current=false;fadeOwnerRef.current?.pause();setIsPlaying(false);return;}
+    ++durationPlayIntent.current; durationStartPending.current = true;
     const current=projectRef.current;
-    if(!current.clips.some(clipHasAudioFade)){setFadeError(null);setIsPlaying(true);return;}
-    const token=++fadePlayIntent.current;fadePreparing.current=true;
+    if(!current.clips.some(clipHasAudioFade)){setFadeError(null);durationStartPending.current=true;setIsPlaying(true);return;}
+    const token=++fadePlayIntent.current;fadePreparing.current=true;setDurationPreparing(true);
     const failed=(error:unknown)=>{
       if(token!==fadePlayIntent.current)return;
-      fadePreparing.current=false;setFadeError(String(error));
+      fadePreparing.current=false;durationStartPending.current=false;setDurationPreparing(false);setFadeError(String(error));
       const audio=resolveAudioClipAtPlayhead(projectRef.current,projectRef.current.playheadSec);
       // An unavailable dedicated graph must not disable the untouched native path.
-      if(!audio||!clipHasAudioFade(audio.clip))setIsPlaying(true);
+      if(!audio||!clipHasAudioFade(audio.clip)){durationStartPending.current=true;setIsPlaying(true);}
     };
-    try{void ensureFadeOwner().prepare().then(()=>{if(token===fadePlayIntent.current){fadePreparing.current=false;setFadeError(null);setIsPlaying(true);}}).catch(failed);}
+    try{void ensureFadeOwner().prepare().then(()=>{if(token===fadePlayIntent.current){fadePreparing.current=false;durationStartPending.current=false;setDurationPreparing(false);setFadeError(null);durationStartPending.current=true;setIsPlaying(true);}}).catch(failed);}
     catch(error){failed(error);}
   }, [ensureFadeOwner]);
+  const fitDuration = () => {
+    const intent = durationPlayIntent.current;
+    editor.fitContentDuration(() => contentDurationOwnerStopped(durationOwnerAlive.current, isPlayingRef.current,
+      fadePreparing.current, durationStartPending.current, durationPlayIntent.current, intent));
+  };
+  const durationReason = isPlaying || durationPreparing || fadePreparing.current || durationStartPending.current
+    ? "再生・準備を停止してから操作してください。"
+    : seekBlocked || editor.moveToPlayheadCaptureActive ? "現在の操作を終了してから実行してください。"
+      : contentDurationPlan(project).reason;
   const stepForward = useCallback(() => {
     setPlayheadSec(
       Math.min(projectRef.current.compositionDurationSec, playheadSecRef.current + FRAME_STEP_SEC),
@@ -329,7 +347,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     isPlayingRef.current = false;
     fadeTimelineRef.current = null;
     ++fadePlayIntent.current;
-    fadePreparing.current = false;
+    fadePreparing.current = false; durationStartPending.current = false; setDurationPreparing(false);
     fadeOwnerRef.current?.pause();
     audioVideoRef.current?.pause();
     setIsPlaying(false);
@@ -660,7 +678,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     if (container) observer.observe(container);
     window.addEventListener("resize", requestDraw);
     document.addEventListener("fullscreenchange", requestDraw);
-    const visibility=()=>{if(document.visibilityState==='hidden'&&fadeOwnerRef.current?.isActive){++fadePlayIntent.current;fadePreparing.current=false;fadeOwnerRef.current.pause();isPlayingRef.current=false;setIsPlaying(false);}requestDraw();};
+    const visibility=()=>{if(document.visibilityState==='hidden'&&fadeOwnerRef.current?.isActive){++fadePlayIntent.current;fadePreparing.current=false;durationStartPending.current=false;setDurationPreparing(false);fadeOwnerRef.current.pause();isPlayingRef.current=false;setIsPlaying(false);}requestDraw();};
     document.addEventListener("visibilitychange", visibility);
     audio?.addEventListener("loadeddata", syncAudio);
     audio?.addEventListener("seeked", syncAudio);
@@ -1009,6 +1027,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
                   <span>{item.desc}</span>
                 </li>
               ))}
+              <li>編集を終えたら再生を停止し、「動画の長さを内容に合わせる」で末尾の空白を削除できます。意図した余韻も削られ、Undoで戻せます。後の編集で長さが再び延びた場合は、書き出し前に再適用してください。</li>
             </ul>
             <button ref={helpCloseRef} type="button" className="secondary" onClick={() => setHelpOpen(false)}>
               閉じる
@@ -1026,6 +1045,20 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
             onStepForward={stepForward}
             onSeekEnd={seekEnd}
           />
+          <span className="content-duration-action">
+            <button type="button" data-fit-content-duration aria-disabled={Boolean(durationReason)}
+              title={durationReason ?? "末尾の空白を削り、最後のクリップまでの長さにします。意図した余韻も削られます。Undoで戻せます。"}
+              onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.stopPropagation();
+                  if (event.repeat || event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) event.preventDefault();
+                } else if (event.nativeEvent.isComposing || event.keyCode === 229) event.preventDefault();
+              }}
+              onClick={event => { if (!event.defaultPrevented) fitDuration(); }}>
+              動画の長さを内容に合わせる
+            </button>
+            <span className="muted" role="status">{durationReason ?? "末尾の余韻も削られます。Undoで戻せます。"}</span>
+          </span>
           <ExactSeekInput key={`${editor.projectEpoch}:${seekBlocked}`} position={project.playheadSec}
             epoch={editor.projectEpoch} disabled={seekBlocked} onCommit={commitExactSeek} />
         </div>
