@@ -6,6 +6,7 @@ import process from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
+import { visiblePointerPoint, dragToVisibleTarget } from './browser-pointer.mjs';
 const suite=verification('group-move',3183),{evidence,baseURL,ff}=suite;
 const checks=[],errors=[];let page,template,ids;
 const check=(name,ok=true)=>{assert(ok,name);checks.push(name);console.log('PASS',name);fs.writeFileSync(`${evidence}/results.json`,JSON.stringify({checks,errors},null,2));};
@@ -15,7 +16,7 @@ async function save(){await page.getByRole('button',{name:'新しい保存版を
 async function load(doc,name){const file=`${evidence}/${name}.json`;fs.writeFileSync(file,JSON.stringify(doc));const response=page.waitForResponse(r=>r.url().endsWith('/api/projects/load'));await page.locator('.project-persistence input[type=file]').setInputFiles(file);assert((await response).ok());await page.waitForFunction(()=>!document.querySelector('.busy-banner'));assert.deepEqual(await page.locator('.error-banner').allTextContents(),[]);}
 async function select(){await clip(ids[2]).click({position:{x:20,y:10}});await clip(ids[0]).click({position:{x:20,y:10}});await page.keyboard.down('Control');await clip(ids[1]).click({position:{x:20,y:10}});await page.keyboard.up('Control');await page.waitForFunction(()=>document.querySelectorAll('.timeline-clip--selected').length===2);}
 async function seek(sec){const input=page.getByLabel('再生位置',{exact:true});await input.fill(String(sec));await input.press('Enter');await input.blur();}
-async function begin(dx,{alt=false}={}){const b=await clip(ids[0]).boundingBox();if(alt)await page.keyboard.down('Alt');await page.mouse.move(b.x+20,b.y+10);await page.mouse.down();await page.mouse.move(b.x+20+dx,b.y+10,{steps:5});return {x:b.x+20,y:b.y+10};}
+async function begin(dx,{alt=false}={}){const point=await visiblePointerPoint(page,clip(ids[0]),{x:20,y:10});if(alt)await page.keyboard.down('Alt');await page.mouse.move(point.x,point.y);await page.mouse.down();await page.mouse.move(point.x+dx,point.y,{steps:5});return point;}
 async function end(){await page.mouse.up();await page.keyboard.up('Alt');}
 
 async function positions(a,b){await page.waitForFunction(({ids,a,b})=>ids.slice(0,2).every((id,i)=>Math.abs((parseFloat(document.querySelector(`[data-clip-id="${id}"]`).style.left)-48)/80-[a,b][i])<1e-7),{ids,a,b});}
@@ -24,7 +25,7 @@ async function positions(a,b){await page.waitForFunction(({ids,a,b})=>ids.slice(
  ff(['-y','-f','lavfi','-i','color=blue:s=160x120','-frames:v','1',`${evidence}/blue.png`]);
  await suite.start();const browser=await suite.launch();page=await browser.newPage({viewport:{width:1800,height:1100}});page.on('pageerror',e=>errors.push(e.message));await page.goto(baseURL);
  await page.locator('.asset-library input[type=file]').setInputFiles([`${evidence}/red.mp4`,`${evidence}/blue.png`]);await page.waitForFunction(()=>document.querySelectorAll('.asset-card').length===2&&!document.querySelector('.busy-banner'));
- await page.locator('.asset-card').first().dragTo(page.locator('.timeline-track-row').first(),{targetPosition:{x:48,y:30}});await clips().waitFor();template=await save();
+ await dragToVisibleTarget(page, page.locator('.asset-card').first(), page.locator('.timeline-track-row').first(),{targetPosition:{x:48,y:30}});await clips().waitFor();template=await save();
  const a=template.project.assets.find(a=>a.displayName==='red'),b=template.project.assets.find(a=>a.displayName==='blue');ids=[randomUUID(),randomUUID(),randomUUID()];
  const make=(id,trackId,start,asset,contain=false)=>({id,trackId,timelineStartSec:start,durationSec:1,parts:[{assetId:asset.id,sourceInSec:0,sourceOutSec:1}],transform:{x:.5,y:.5,scale:2},...(contain?{layoutMode:'contain'}:{})});
  template.version=2;Object.assign(template.project,{compositionWidth:320,compositionHeight:320,compositionDurationSec:30,clips:[make(ids[0],template.project.tracks[0].id,1,a,true),make(ids[1],template.project.tracks[1].id,3,b),make(ids[2],template.project.tracks[0].id,7,a)]});

@@ -5,6 +5,7 @@ import console from 'node:console';
 import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
+import { visiblePointerPoint, dragToVisibleTarget } from './browser-pointer.mjs';
 const suite = verification('empty-tracks', 3147);
 const { evidence, baseURL, ff } = suite;
 let page;
@@ -55,8 +56,8 @@ async function importDoc(doc,name) {
     JSON.stringify(restoredDoc.project.tracks)===JSON.stringify(initialDoc.project.tracks)&&await page.locator('.track-delete-status').innerText()==='');
   await redo.click();await waitTracks(1);
   await add.click();await waitTracks(2);await undo.click();await waitTracks(1);assert(await redo.isEnabled());
-  const guardedBox=await buttons().first().boundingBox();
-  await page.mouse.click(guardedBox.x+guardedBox.width/2,guardedBox.y+guardedBox.height/2);
+  const guardedPoint=await visiblePointerPoint(page,buttons().first());
+  await page.mouse.click(guardedPoint.x,guardedPoint.y);
   await page.keyboard.press('Enter');await page.keyboard.press('Space');
   check('invalid last-track attempts preserve pending Redo',await redo.isEnabled()&&await buttons().count()===1);
   await redo.click();await waitTracks(2);
@@ -75,7 +76,7 @@ async function importDoc(doc,name) {
   assert.equal(await buttons().count(),2);releaseUpload();
   await page.locator('.asset-card').waitFor();await page.waitForFunction(()=>!document.querySelector('.busy-banner'));
   await page.unroute('**/api/assets');
-  await page.locator('.asset-card').dragTo(page.locator('.timeline-track-row').first(),{targetPosition:{x:48,y:30}});
+  await dragToVisibleTarget(page, page.locator('.asset-card'), page.locator('.timeline-track-row').first(),{targetPosition:{x:48,y:30}});
   await page.locator('.timeline-clip').waitFor();
   await buttons().first().focus();await page.keyboard.press('Space');
   check('occupied-track deletion stays disabled with a keyboard-readable reason',await buttons().count()===2&&await page.locator('.track-delete-reason').first().innerText()==='クリップがあるトラックは削除できません');

@@ -5,6 +5,7 @@ import console from 'node:console';
 import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
+import { dragToVisibleTarget } from './browser-pointer.mjs';
 const suite = verification('contain-layout', 3137);
 const { evidence, baseURL, ff } = suite;
 const checks = [], errors = [];
@@ -36,7 +37,7 @@ async function downloadJob(jobId, file, width, height) {
   await page.locator('.asset-library input[type=file]').setInputFiles(`${evidence}/source.mp4`);
   await page.locator('.asset-card').waitFor();
   await page.waitForFunction(()=>!document.querySelector('.asset-library input').disabled);
-  await page.locator('.asset-card').dragTo(page.locator('.timeline-track-row').last(),{targetPosition:{x:48,y:30}});
+  await dragToVisibleTarget(page, page.locator('.asset-card'), page.locator('.timeline-track-row').last(),{targetPosition:{x:48,y:30}});
   await page.locator('.timeline-clip').waitFor();
   await page.getByRole('button',{name:'新しい保存版を保存',exact:true}).click();
   await page.waitForFunction(()=>!document.querySelector('.busy-banner'));

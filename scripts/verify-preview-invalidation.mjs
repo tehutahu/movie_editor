@@ -5,6 +5,7 @@ import console from 'node:console';
 import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
+import { visiblePointerPoint, dragToVisibleTarget } from './browser-pointer.mjs';
 const suite = verification('preview-invalidation', 3126);
 const { evidence, baseURL, ff } = suite;
 let page;
@@ -58,7 +59,7 @@ function check(name, value = true) {
   let releaseImage;
   const imageReady = new Promise(resolve => { releaseImage = resolve; });
   await page.route('**/api/assets/*/stream', async route => { await imageReady; await route.continue(); });
-  await page.locator('.asset-card').dragTo(page.locator('.timeline-track-row').last(), { targetPosition: { x: 48, y: 30 } });
+  await dragToVisibleTarget(page, page.locator('.asset-card'), page.locator('.timeline-track-row').last(), { targetPosition: { x: 48, y: 30 } });
   await page.locator('.timeline-clip').waitFor();
   releaseImage();
   await page.waitForFunction(() => {
@@ -77,9 +78,9 @@ function check(name, value = true) {
   await page.waitForFunction(previous => document.querySelector('canvas').toDataURL() !== previous, beforeSelection.pixels);
   check('selection invalidates transform handles');
   const selected = await canvasState();
-  const box = await page.locator('canvas').boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + 50, box.y + box.height / 2);
+  const point = await visiblePointerPoint(page, page.locator('canvas'));
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down(); await page.mouse.move(point.x + 50, point.y);
   await page.waitForFunction(previous => document.querySelector('canvas').toDataURL() !== previous, selected.pixels);
   await captureEvidenceScreenshot(page, `${evidence}/transform-drag.png`);
   await page.mouse.up();
@@ -113,12 +114,23 @@ function check(name, value = true) {
   check('fullscreen button entry and browser API exit redraw canvas dimensions');
   await page.locator('.asset-library input[type=file]').setInputFiles(`${evidence}/moving.mp4`);
   await page.waitForFunction(() => document.querySelectorAll('.asset-card').length === 2 && !document.querySelector('.asset-library input').disabled);
-  await page.locator('.asset-card').filter({ hasText: 'moving' }).dragTo(page.locator('.timeline-track-row').first(), { targetPosition: { x: 48, y: 30 } });
+  await dragToVisibleTarget(page, page.locator('.asset-card').filter({ hasText: 'moving' }), page.locator('.timeline-track-row').first(), { targetPosition: { x: 48, y: 30 } });
+  await page.waitForFunction(() => document.querySelectorAll('.timeline-clip').length === 2 &&
+    document.querySelector('.timeline-track-row .timeline-clip')?.textContent === 'moving');
+  const savedSetup = page.waitForResponse(response => response.url().endsWith('/api/projects') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: '新しい保存版を保存', exact: true }).click();
+  const setupResponse = await savedSetup; assert(setupResponse.ok());
+  const { document: setup } = await setupResponse.json();
+  const movingAsset = setup.project.assets.find(asset => asset.displayName === 'moving');
+  const frontTrack = [...setup.project.tracks].sort((a, b) => a.order - b.order)[0];
+  assert(movingAsset && setup.project.clips.some(clip => clip.trackId === frontTrack.id && clip.parts.some(part => part.assetId === movingAsset.id)),
+    'native drop places the actual moving-video asset on T1');
+  fs.writeFileSync(`${evidence}/video-setup-project.json`, JSON.stringify(setup, null, 2));
+  await page.waitForFunction(() => !document.querySelector('.busy-banner'));
   await page.waitForFunction(() => window.__preview.videos.some(video => video.readyState >= 2 && video.videoWidth > 0));
   const seek = async sec => {
-    const scroll = await page.locator('.timeline-scroll').boundingBox();
-    const ruler = await page.locator('.timeline-ruler').boundingBox();
-    await page.mouse.click(scroll.x + 48 + sec * 80, ruler.y + 8);
+    const point = await visiblePointerPoint(page, page.locator('.timeline-scroll'), { x: 48 + sec * 80, y: 8 });
+    await page.mouse.click(point.x, point.y);
   };
   const firstVideo = await canvasState();
   const beforeSeek = await page.evaluate(() => window.__preview.videoSeeks);

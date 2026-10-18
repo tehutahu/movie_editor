@@ -5,6 +5,7 @@ import console from 'node:console';
 import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
+import { visiblePointerPoint, dragToVisibleTarget } from './browser-pointer.mjs';
 const suite = verification('playhead-snap', 3102);
 const { evidence, baseURL, ff } = suite;
 let page;
@@ -23,22 +24,21 @@ const check = (name, value = true) => {
   await page.locator('.asset-library input[type=file]').setInputFiles(`${evidence}/source.mp4`);
   await page.locator('.asset-card').waitFor();
   await page.waitForFunction(() => !document.querySelector('.asset-library input').disabled);
-  await page.locator('.asset-card').dragTo(page.locator('.timeline-track-row').last(), { targetPosition: { x: 48, y: 30 } });
+  await dragToVisibleTarget(page, page.locator('.asset-card'), page.locator('.timeline-track-row').last(), { targetPosition: { x: 48, y: 30 } });
   const clip = page.locator('.timeline-clip');
   await clip.waitFor();
   const undo = page.getByTitle('Undo (Ctrl+Z)', { exact: true });
   const redo = page.getByTitle('Redo (Shift+Ctrl+Z)', { exact: true });
   const left = () => clip.evaluate(el => parseFloat(el.style.left) - 48);
   const seek = async (sec, pps = 80) => {
-    const scroll = await page.locator('.timeline-scroll').boundingBox();
-    const ruler = await page.locator('.timeline-ruler').boundingBox();
-    await page.mouse.click(scroll.x + 48 + sec * pps, ruler.y + 8);
+    const point = await visiblePointerPoint(page, page.locator('.timeline-scroll'), { x: 48 + sec * pps, y: 8 });
+    await page.mouse.click(point.x, point.y);
   };
   const begin = async (delta) => {
-    const box = await clip.boundingBox();
-    await page.mouse.move(box.x + 24, box.y + 20);
+    const point = await visiblePointerPoint(page, clip, { x: 24, y: 20 });
+    await page.mouse.move(point.x, point.y);
     await page.mouse.down();
-    await page.mouse.move(box.x + 24 + delta, box.y + 20, { steps: 5 });
+    await page.mouse.move(point.x + delta, point.y, { steps: 5 });
     await page.waitForFunction(() => document.querySelector('.timeline-clip--dragging'));
   };
   const expectLeft = async (px) => {
@@ -81,10 +81,10 @@ const check = (name, value = true) => {
   check('outside threshold remains unsnapped at zoom 2');
   await page.mouse.up(); await undo.click();
   // A movement that crosses the activation threshold and returns is a no-op.
-  const box = await clip.boundingBox();
-  await page.mouse.move(box.x + 24, box.y + 20); await page.mouse.down();
-  await page.mouse.move(box.x + 44, box.y + 20);
-  await page.mouse.move(box.x + 24, box.y + 20);
+  const point = await visiblePointerPoint(page, clip, { x: 24, y: 20 });
+  await page.mouse.move(point.x, point.y); await page.mouse.down();
+  await page.mouse.move(point.x + 20, point.y);
+  await page.mouse.move(point.x, point.y);
   await page.mouse.up();
   await expectLeft(0);
   check('no-op drag preserves pending Redo', await redo.isEnabled());
