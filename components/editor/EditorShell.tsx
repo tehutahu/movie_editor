@@ -14,6 +14,22 @@ const MIN_WORKSPACE_PX = 220;
 const MIN_TIMELINE_TOOLBAR_PX = 52;
 const TIMELINE_PANEL_PADDING_PX = 32;
 
+/** Preserve the fixed controls and the existing minimum canvas while resizing. */
+function minimumWorkspaceHeightPx(shell: HTMLElement | null): number {
+  if (!shell || !window.matchMedia("(min-width: 981px)").matches) return MIN_WORKSPACE_PX;
+  const center = shell.querySelector<HTMLElement>(".editor-center-col");
+  const bar = shell.querySelector<HTMLElement>(".editor-project-bar");
+  const preview = shell.querySelector<HTMLElement>(".compositor-preview");
+  const canvas = shell.querySelector<HTMLElement>(".compositor-canvas-wrap");
+  const transport = shell.querySelector<HTMLElement>(".preview-transport");
+  if (!center || !bar || !preview || !canvas || !transport) return MIN_WORKSPACE_PX;
+  const px = (value: string) => Number.parseFloat(value) || 0;
+  const columnStyle = getComputedStyle(center), previewStyle = getComputedStyle(preview), transportStyle = getComputedStyle(transport);
+  return Math.max(MIN_WORKSPACE_PX, Math.ceil(bar.getBoundingClientRect().height + px(columnStyle.rowGap) +
+    px(previewStyle.paddingTop) + px(previewStyle.paddingBottom) + px(previewStyle.borderTopWidth) + px(previewStyle.borderBottomWidth) +
+    px(getComputedStyle(canvas).minHeight) + transport.getBoundingClientRect().height + px(transportStyle.marginTop) + px(transportStyle.marginBottom)));
+}
+
 function timelinePaneHeightPx(trackCount: number): number {
   return MIN_TIMELINE_TOOLBAR_PX + TIMELINE_PANEL_PADDING_PX + timelineTracksAreaHeightPx(trackCount);
 }
@@ -59,7 +75,7 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
   const clampWorkspaceHeight = useCallback(
     (raw: number, shellHeight: number) => {
       const maxTop = shellHeight - SPLIT_HANDLE_HEIGHT_PX - timelineHeightPx;
-      return Math.min(maxTop, Math.max(MIN_WORKSPACE_PX, raw));
+      return Math.max(minimumWorkspaceHeightPx(shellRef.current), Math.min(maxTop, raw));
     },
     [timelineHeightPx],
   );
@@ -81,6 +97,9 @@ export function EditorShell({ editor }: { editor: EditorStore }) {
     syncHeights();
     const ro = new ResizeObserver(syncHeights);
     ro.observe(shell);
+    // Width, validation hints and fullscreen can change control wrapping without
+    // changing the fixed outer shell height.
+    for (const element of shell.querySelectorAll(".editor-project-bar, .preview-transport, .compositor-canvas-wrap")) ro.observe(element);
     return () => ro.disconnect();
   }, [clampWorkspaceHeight, timelineHeightPx]);
 

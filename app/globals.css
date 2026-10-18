@@ -40,6 +40,11 @@ main:has(.editor-shell-v2) {
   box-sizing: border-box;
 }
 
+/* Bound the side-by-side editor; narrow stacked layouts retain document flow. */
+@media (min-width: 981px) {
+  main:has(.editor-shell-v2) { height: 100dvh; }
+}
+
 .panel {
   background: #171a21;
   border: 1px solid #273043;
@@ -984,6 +989,7 @@ button.primary {
 }
 
 .editor-project-bar {
+  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
