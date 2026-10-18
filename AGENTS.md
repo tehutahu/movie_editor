@@ -15,6 +15,7 @@ See [README.md](README.md) for user-facing setup and usage.
 | Asset library | Multi-file upload (video + image), drag to timeline |
 | Timeline | Multi-track, relative horizontal group move for selected clips (fixed tracks, atomic collision rejection), drag/move, edge resize, split/merge/delete/duplicate, overlap resolution, zoom, filmstrip thumbnails (video) |
 | Preview | Canvas compositor (position/scale), playback controls, frame step, fullscreen, existing audio winner with per-clip gain 0–1 (zero silences; selected source downloads retain original audio) |
+| Titles | Editable Japanese source, manual newlines, fixed bundled font, shared canonical PNG, project v4 |
 | Editing | Undo/redo command history, resizable preview/timeline split (persisted in `localStorage`) |
 | Jobs | Speed restore, per-clip segment export, full composition export (variable resolution mp4) |
 | Storage | Local filesystem (default) or Vercel Blob |
@@ -28,7 +29,7 @@ Do not assume these exist when testing or extending the app:
 - **merge-kept UI** — `POST /api/jobs/merge-kept` works but is only wired in the legacy editor, not the NLE.
 - **Track management** — add tracks and delete empty tracks, keeping at least one track. Deletion compresses T numbers while preserving order and ties, and supports Undo. No deletion of populated tracks, reorder, mute, solo, or lock.
 - **Asset management** — no delete/rename in the NLE asset panel.
-- **Advanced editing** — no transitions, effects, text overlays, opacity, audio fades, ripple/roll trim, copy/paste, or grid snapping. Clip moves snap their start/end to the playhead within 8 CSS px (Alt bypass); overlap avoidance remains enabled.
+- **Advanced editing** — no transitions, effects, animated/rich text, opacity, audio fades, ripple/roll trim, copy/paste, or grid snapping. Clip moves snap their start/end to the playhead within 8 CSS px (Alt bypass); overlap avoidance remains enabled.
 - **Export options** — mp4 only; composition resolution presets (16:9 / 9:16 / 1:1), auto-match on first clip placement, manual match-to-selected-clip; no custom width×height input or frame-rate picker. Clips default to stretch-fit; explicit per-clip contain fits the full source inside the transform rect with transparent margins and image alpha. Old projects retain stretch. Selected-clip downloads remain source exports with separate layout rules (see README).
 - **Auth / collaboration / cloud project files** — local single-user MVP.
 

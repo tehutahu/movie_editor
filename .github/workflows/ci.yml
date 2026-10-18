@@ -61,6 +61,12 @@ jobs:
           FFPROBE_PATH: ""
         run: npx vitest run lib/clipAudio.regression.test.ts
 
+      - name: Title regressions with the bundled encoder and probe
+        env:
+          FFMPEG_PATH: ""
+          FFPROBE_PATH: ""
+        run: npx vitest run lib/titleComposition.regression.test.ts lib/titleRenderer.regression.test.ts lib/titleRenderer.initialization.test.ts
+
       - name: Build
         run: npm run build
 
