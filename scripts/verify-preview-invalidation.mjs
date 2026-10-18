@@ -1,4 +1,4 @@
-/* global document, window, CanvasRenderingContext2D, Event */
+/* global document, window, CanvasRenderingContext2D, Event, requestAnimationFrame */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import console from 'node:console';
@@ -89,11 +89,31 @@ function check(name, value = true) {
   await page.waitForFunction(previous => document.querySelector('canvas').toDataURL() !== previous, moved.pixels);
   check('transform preview, release and Undo redraw while stopped');
   await page.setViewportSize({ width: 1280, height: 900 });
+  const resizeGeometry = [];
+  const expectCurrentFit = async phase => {
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const available = await page.locator('.compositor-canvas-wrap').evaluate(el => ({ width: el.clientWidth, height: el.clientHeight }));
+    // The first synthetic image is 160x120; auto-match preserves its 4:3 frame.
+    const unit = Math.min(available.width / 4, available.height / 3);
+    const expected = { width: Math.max(1, Math.round(4 * unit)), height: Math.max(1, Math.round(3 * unit)) };
+    await page.waitForFunction(expected => { const canvas = document.querySelector('canvas'); return canvas.width === expected.width && canvas.height === expected.height; }, expected);
+    const actual = await canvasState();
+    resizeGeometry.push({ phase, viewport: page.viewportSize(), available, expected, actual: { width: actual.width, height: actual.height } });
+    fs.writeFileSync(`${evidence}/resize-geometry.json`, JSON.stringify(resizeGeometry, null, 2));
+    return actual;
+  };
+  const currentViewport = await expectCurrentFit('current viewport before override');
   await page.locator('.compositor-canvas-wrap').evaluate(element => { element.style.flex = 'none'; element.style.height = '120px'; element.style.minHeight = '0px'; });
-  await page.waitForFunction(previous => document.querySelector('canvas').width !== previous, selected.width);
+  await expectCurrentFit('explicit 120px container');
+  await page.waitForFunction(previous => document.querySelector('canvas').width !== previous, currentViewport.width);
   check('container resize redraws canvas dimensions');
+  const paintsBeforeContainerRestore = await page.evaluate(() => window.__preview.paints);
   await page.locator('.compositor-canvas-wrap').evaluate(element => { element.style.flex = ''; element.style.height = ''; element.style.minHeight = ''; });
-  await page.waitForFunction(previous => document.querySelector('canvas').width === previous, selected.width);
+  const restoredViewport = await expectCurrentFit('current viewport after restore');
+  assert.equal(restoredViewport.width, currentViewport.width);
+  assert.equal(restoredViewport.height, currentViewport.height);
+  assert.equal(restoredViewport.pixels, currentViewport.pixels);
+  check('restoring the current viewport container repaints the same canonical frame', await page.evaluate(() => window.__preview.paints) > paintsBeforeContainerRestore);
   const paintsBeforeVisibility = await page.evaluate(() => window.__preview.paints);
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await page.waitForFunction(previous => window.__preview.paints > previous, paintsBeforeVisibility);
