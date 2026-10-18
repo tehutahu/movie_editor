@@ -77,7 +77,7 @@ it.skipIf(!real).each([0, 90, 180, 270])(
         await expect(loadProject(wrongKind, loadedSession)).rejects.toThrow(/種類/);
         const wrongDuration = structuredClone(revision.document); wrongDuration.project.assets[0].sourceDurationSec = 2;
         await expect(loadProject(wrongDuration, loadedSession)).rejects.toThrow(/メタデータ/);
-        const wrongInterval = structuredClone(revision.document); wrongInterval.project.clips[0].parts[0].sourceOutSec = 2;
+        const wrongInterval = structuredClone(revision.document); wrongInterval.project.clips[0].parts![0].sourceOutSec = 2;
         await expect(loadProject(wrongInterval, loadedSession)).rejects.toThrow();
       }
     } finally {

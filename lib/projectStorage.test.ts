@@ -58,6 +58,7 @@ import {
 } from "./storageRetention";
 import { projectDocumentDraft } from "./editor/projectDocument";
 import { createEmptyProject, clipFromAsset } from "./editor/project";
+import { addTitle } from "./editor/title";
 import { clearJobStoreForTests, createJobRecord } from "./jobs";
 let root: string;
 beforeEach(async () => {
@@ -107,6 +108,13 @@ async function source(bytes = "actual media bytes") {
   ];
   return { session, id, doc: projectDocumentDraft(p) };
 }
+it("saves and reloads title-only v4 with no media reference or generated-cache dependency", async () => {
+  const project = addTitle(createEmptyProject(), randomUUID(), "日本語\n再編集できる本文")!;
+  const id = randomUUID(); await saveProject(id, projectDocumentDraft(project));
+  const doc = await readProject(id); expect(doc.project.assets).toEqual([]); expect(doc.version).toBe(4);
+  const loaded = await loadProject(doc, randomUUID()); expect(loaded.project.clips).toEqual(project.clips);
+  expect(loaded.project.assets).toEqual([]); await deleteProject(id);
+});
 it("saved versions protect bytes after tab release and restart; explicit delete respects other versions/tabs/jobs", async () => {
   const s = await source(),
     v1 = randomUUID(),
@@ -177,7 +185,7 @@ it("validates fingerprints, supports exact-byte relinking with a distinct logica
   const loaded = await loadProject(revision.document, tab, { [s.id]: good.id });
   expect(loaded.project.assets[0].id).toBe(s.id);
   expect(loaded.project.assets[0].storageAssetId).toBe(good.id);
-  expect(loaded.project.clips[0].parts[0].assetId).toBe(s.id);
+  expect(loaded.project.clips[0].parts![0].assetId).toBe(s.id);
   await releaseStorageSession(good.session);
   await access(path.join(root, "uploads", good.id));
 });

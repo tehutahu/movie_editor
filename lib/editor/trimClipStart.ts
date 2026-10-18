@@ -1,3 +1,4 @@
+import { isMediaClip, type MediaClip } from "./types";
 import { MIN_CLIP_DURATION_SEC, type Clip, type EditorProject } from "@/lib/editor/types";
 
 const START_EPS_SEC = 1e-9;
@@ -24,7 +25,7 @@ function ulp(value: number): number {
 function arithmeticBudget(trace: number[]): number {
   return 2 * trace.reduce((sum, value) => sum + ulp(value), 0);
 }
-function partSum(parts: Clip["parts"], trace: number[]): number {
+function partSum(parts: MediaClip["parts"], trace: number[]): number {
   // Match the existing validator's addition/subtraction order exactly.
   return parts.reduce((sum, part) => {
     const added = sum + part.sourceOutSec, next = added - part.sourceInSec;
@@ -49,6 +50,7 @@ export function trimClipStart(project: EditorProject, clipId: string, requestedS
   if (start - clip.timelineStartSec <= START_EPS_SEC) return null;
   const nominalStart = Math.max(clip.timelineStartSec, Math.min(requestedStartSec, end - MIN_CLIP_DURATION_SEC));
   if (Math.abs(start - nominalStart) > Math.min(arithmeticBudget([clip.timelineStartSec, oldDuration, end, nominalStart, start]), MAX_TRIM_ROUNDING_SEC)) return null;
+  if (!isMediaClip(clip)) return { ...project, clips: project.clips.map(c => c.id === clip.id ? { ...clip, timelineStartSec: start, durationSec: end - start } : c) };
   const prefix = start - clip.timelineStartSec;
   // Keep coordinate domains separate: huge source timestamps must never
   // authorize a visible change to the timeline's endpoint.
@@ -57,7 +59,7 @@ export function trimClipStart(project: EditorProject, clipId: string, requestedS
   const oldSum = partSum(clip.parts, sourceTrace), oldDrift = oldDuration - oldSum;
   sourceTrace.push(oldDrift);
   let remaining = prefix;
-  let firstOriginal: Clip["parts"][number] | undefined;
+  let firstOriginal: MediaClip["parts"][number] | undefined;
   let wholeConsumed = 0, localPrefix = 0;
   const parts = [];
   for (const part of clip.parts) {
@@ -77,14 +79,14 @@ export function trimClipStart(project: EditorProject, clipId: string, requestedS
     } else parts.push(part);
   }
   if (parts.length === 0) return null;
-  function sourceProgressError(candidateParts: Clip["parts"]): number {
+  function sourceProgressError(candidateParts: MediaClip["parts"]): number {
     const progress = candidateParts[0].sourceInSec - firstOriginal!.sourceInSec;
     sourceTrace.push(progress, wholeConsumed + progress, localPrefix);
     // Comparing newIn with normalIn alone misses offsets swallowed by the same
     // coarse float. Check the actual represented progress, locally and globally.
     return Math.max(Math.abs(progress - localPrefix), Math.abs(wholeConsumed + progress - prefix));
   }
-  function chooseDuration(candidateParts: Clip["parts"]): number | undefined {
+  function chooseDuration(candidateParts: MediaClip["parts"]): number | undefined {
     const sourceError = sourceProgressError(candidateParts);
     if (!Number.isFinite(sourceError) || sourceError > Math.min(arithmeticBudget(sourceTrace), MAX_TRIM_ROUNDING_SEC)) return undefined;
     const sum = partSum(candidateParts, sourceTrace);
@@ -107,7 +109,7 @@ export function trimClipStart(project: EditorProject, clipId: string, requestedS
     const normalIn = parts[0].sourceInSec, corrected = normalIn + (sum - target);
     sourceTrace.push(target, sum - target, corrected);
     const candidates = [corrected, adjacent(corrected, false), adjacent(corrected, true)];
-    const options: { parts: Clip["parts"]; duration: number; sourceError: number }[] = [];
+    const options: { parts: MediaClip["parts"]; duration: number; sourceError: number }[] = [];
     for (const sourceInSec of candidates) {
       sourceTrace.push(sourceInSec);
       if (sourceInSec < firstOriginal.sourceInSec || sourceInSec >= firstOriginal.sourceOutSec ||
@@ -140,7 +142,7 @@ export function trimStartReason(project: EditorProject, checkPrecision = true): 
 }
 
 function targetIdentity(project: EditorProject, clip: Clip): string {
-  return JSON.stringify({ clip, assets: clip.parts.map(part => {
+  return JSON.stringify({ clip, assets: (isMediaClip(clip) ? clip.parts : []).map(part => {
     const asset = project.assets.find(a => a.id === part.assetId);
     return asset ? { id: asset.id, storageAssetId: asset.storageAssetId, sourceJobId: asset.sourceJobId,
       streamUrl: asset.streamUrl, kind: asset.kind, ext: asset.ext, sourceDurationSec: asset.sourceDurationSec,

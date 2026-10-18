@@ -1,3 +1,4 @@
+import { isMediaClip } from "./editor/types";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
@@ -102,7 +103,7 @@ async function validateMedia(doc: ProjectDocument, saving: boolean) {
       asset.kind === "video" &&
       (!meta.hasVideo ||
         doc.project.clips.some((c) =>
-          c.parts.some(
+          isMediaClip(c) && c.parts.some(
             (p) =>
               p.assetId === asset.id &&
               p.sourceOutSec > meta.durationSec + 1e-6,

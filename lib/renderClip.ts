@@ -14,6 +14,7 @@ export async function renderClipToFile(params: {
 }): Promise<void> {
   const { clip, assets, jobDir, outputPath, width, height } = params;
   const paths: string[] = [];
+  if (clip.kind === "title") throw new Error("タイトルは専用raster経路が必要です。");
   const plan = clip.parts.length > 1 ? planMultipartVideo(clip) : null;
   const streams: { video: boolean; audio: boolean }[] = [];
   try {

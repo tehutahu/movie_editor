@@ -13,7 +13,7 @@ function fixture(kind: "video" | "image" = "video", repeated = false) {
   p.assets = [a, b];
   const c = clipFromAsset({ asset: a, trackId: p.tracks[0].id, timelineStartSec: 1 });
   c.parts = [{ assetId: a.id, sourceInSec: 1, sourceOutSec: 2 }, { assetId: b.id, sourceInSec: .5, sourceOutSec: 1.5 }];
-  if (repeated) c.parts.push({ assetId: a.id, sourceInSec: 3, sourceOutSec: 4 });
+  if (repeated) c.parts!.push({ assetId: a.id, sourceInSec: 3, sourceOutSec: 4 });
   c.durationSec = repeated ? 3 : 2; c.layoutMode = "contain"; c.transform = { x: .25, y: .6, scale: .8 };
   p.clips = [c, { ...structuredClone(c), id: randomUUID(), timelineStartSec: 6 }, clipFromAsset({ asset: b, trackId: p.tracks[1].id, timelineStartSec: 12 })];
   p.compositionDurationSec = 30; p.compositionWidth = 640; p.compositionHeight = 360;
@@ -22,7 +22,7 @@ function fixture(kind: "video" | "image" = "video", repeated = false) {
 function params(p: EditorProject, factor: number) {
   return { assetId: p.assets[0].id, jobId: randomUUID(), speedFactor: factor, restoredDurationSec: 10 * factor, restoredWidth: 320, restoredHeight: 240 };
 }
-function sum(p: EditorProject, i = 0) { return p.clips[i].parts.reduce((s, part) => s + part.sourceOutSec - part.sourceInSec, 0); }
+function sum(p: EditorProject, i = 0) { return p.clips[i].parts!.reduce((s, part) => s + part.sourceOutSec - part.sourceInSec, 0); }
 function validate(p: EditorProject) {
   const doc = parseProjectDocument(projectDocumentDraft(p));
   expect(documentToProject(doc).clips).toEqual(p.clips);
@@ -36,9 +36,9 @@ describe("mixed asset restore duration", () => {
       expect(result.history.undoStack).toHaveLength(2); expect(result.history.redoStack).toEqual([]);
       for (let i = 0; i < 2; i++) {
         const c = n.clips[i], old = p.clips[i]; expect(c.durationSec).toBe(1 + 2 * factor); expect(sum(n, i)).toBe(c.durationSec);
-        expect(c.parts[1]).toEqual(old.parts[1]);
-        for (const j of [0, 2]) expect(c.parts[j]).toEqual({ ...old.parts[j], sourceInSec: old.parts[j].sourceInSec * factor, sourceOutSec: old.parts[j].sourceOutSec * factor });
-        expect({ ...c, parts: old.parts, durationSec: old.durationSec }).toEqual(old);
+        expect(c.parts![1]).toEqual(old.parts![1]);
+        for (const j of [0, 2]) expect(c.parts![j]).toEqual({ ...old.parts![j], sourceInSec: old.parts![j].sourceInSec * factor, sourceOutSec: old.parts![j].sourceOutSec * factor });
+        expect({ ...c, parts: old.parts!, durationSec: old.durationSec }).toEqual(old);
       }
       expect(n.clips[2]).toEqual(p.clips[2]); expect(n.assets[1]).toEqual(p.assets[1]);
       expect(n).toMatchObject({ compositionWidth: 640, compositionHeight: 360, selectedClipIds: p.selectedClipIds });
@@ -60,7 +60,7 @@ describe("mixed asset restore duration", () => {
   });
   it("keeps the valid all-target legacy result and only falls back when scaling drift would invalidate it", () => {
     for (const drift of [0, 2e-7, 8e-7]) {
-      const p = fixture(); p.clips = [p.clips[0]]; p.clips[0].parts[1].assetId = p.assets[0].id; p.clips[0].durationSec = 2 + drift;
+      const p = fixture(); p.clips = [p.clips[0]]; p.clips[0].parts![1].assetId = p.assets[0].id; p.clips[0].durationSec = 2 + drift;
       const n = applySpeedRestoreToProject(p, params(p, 2)); const legacy = p.clips[0].durationSec * 2;
       if (Math.abs(sum(n) - legacy) <= 1e-6) expect(n.clips[0].durationSec).toBe(legacy);
       else expect(n.clips[0].durationSec - sum(n)).toBeCloseTo(p.clips[0].durationSec - sum(p), 14);
@@ -75,13 +75,13 @@ describe("mixed asset restore duration", () => {
       const n = applySpeedRestoreToProject(p, params(p, factor)); validate(n);
       const intended = p.clips[0].durationSec + (sum(n) - sum(p));
       expect(Math.abs(n.clips[0].durationSec - intended)).toBeLessThanOrEqual(1e-9);
-      expect(n.clips[0].parts).toHaveLength(50);
-      p.clips[0].parts.forEach((part, i) => { if (i % 2) expect(n.clips[0].parts[i]).toEqual(part); });
+      expect(n.clips[0].parts!).toHaveLength(50);
+      p.clips[0].parts!.forEach((part, i) => { if (i % 2) expect(n.clips[0].parts![i]).toEqual(part); });
     }
   });
   it("accepts MIN exactly without inventing source material", () => {
     const p = fixture(); p.clips = [p.clips[0]]; p.clips[0].parts = [{ assetId: p.assets[0].id, sourceInSec: 0, sourceOutSec: .1 }]; p.clips[0].durationSec = .1;
-    const n = applySpeedRestoreToProject(p, params(p, .5)); expect(n.clips[0].durationSec).toBe(.05); expect(n.clips[0].parts[0].sourceOutSec).toBe(.05); validate(n);
+    const n = applySpeedRestoreToProject(p, params(p, .5)); expect(n.clips[0].durationSec).toBe(.05); expect(n.clips[0].parts![0].sourceOutSec).toBe(.05); validate(n);
   });
   it("does not clamp a genuinely below-MIN adjacent duration", () => {
     const p = fixture(); p.clips = [p.clips[0]]; p.clips[0].parts = [{ assetId: p.assets[0].id, sourceInSec: 0, sourceOutSec: .09999999999999999 }]; p.clips[0].durationSec = .09999999999999999;
@@ -89,15 +89,15 @@ describe("mixed asset restore duration", () => {
   });
   it("handles ordinary large source offsets without altering the unrelated part", () => {
     const p = fixture(); p.assets[0].sourceDurationSec = 86400; p.clips = [p.clips[0]];
-    p.clips[0].parts[0].sourceInSec = 86390.1; p.clips[0].parts[0].sourceOutSec = 86391.1;
+    p.clips[0].parts![0].sourceInSec = 86390.1; p.clips[0].parts![0].sourceOutSec = 86391.1;
     const n = applySpeedRestoreToProject(p, { ...params(p, .5), restoredDurationSec: 43200 });
-    expect(n.clips[0].parts[1]).toEqual(p.clips[0].parts[1]); expect(Math.abs(sum(n) - n.clips[0].durationSec)).toBeLessThanOrEqual(1e-6); validate(n);
+    expect(n.clips[0].parts![1]).toEqual(p.clips[0].parts![1]); expect(Math.abs(sum(n) - n.clips[0].durationSec)).toBeLessThanOrEqual(1e-6); validate(n);
   });
   it.each(["MIN", "overflow", "collapsed", "out-of-bounds", "invalid-drift"])("rejects %s atomically, retaining original history and Redo", reason => {
     const p = fixture(); p.clips = [p.clips[0]]; const command = { type: "restoreSpeed" as const, ...params(p, .5) };
     if (reason === "MIN") { p.clips[0].parts = [{ assetId: p.assets[0].id, sourceInSec: 0, sourceOutSec: .05 }]; p.clips[0].durationSec = .05; }
     if (reason === "overflow") command.speedFactor = 1e308;
-    if (reason === "collapsed") { p.clips[0].parts[0].sourceInSec = Number.MIN_VALUE; p.clips[0].parts[0].sourceOutSec = 2 * Number.MIN_VALUE; command.speedFactor = Number.MIN_VALUE; }
+    if (reason === "collapsed") { p.clips[0].parts![0].sourceInSec = Number.MIN_VALUE; p.clips[0].parts![0].sourceOutSec = 2 * Number.MIN_VALUE; command.speedFactor = Number.MIN_VALUE; }
     if (reason === "out-of-bounds") command.restoredDurationSec = .1;
     if (reason === "invalid-drift") p.clips[0].durationSec += .01;
     const history = undo(dispatchCommand(createCommandHistory(p), { type: "addTrack" })!.history)!; const before = structuredClone(history);

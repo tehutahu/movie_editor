@@ -9,7 +9,7 @@ import { parseCompositionExportPayload } from "./editor/validateExportProject";
 import { resolveActiveClipsAtPlayhead, transformToPixelRect } from "./editor/compositor";
 import { exportCompositionToFile } from "./exportComposition";
 import { probeVideo } from "./ffmpeg";
-import type { Asset, Clip, ClipTransform, EditorProject } from "./editor/types";
+import type { Asset, MediaClip as Clip, ClipTransform, EditorProject } from "./editor/types";
 
 const sources = vi.hoisted(() => new Map<string, string>());
 vi.mock("@/lib/assetResolve", () => ({ resolveAssetInputPath: async (a: Asset) => sources.get(a.id) ?? null }));
@@ -86,7 +86,7 @@ it.skipIf(!real).each([0, 10, 10.25])("real ffmpeg #17: source clock and audio a
 it.skipIf(!real)("real ffmpeg #17: adjacent boundary and multiple tracks match preview", async () => {
   const p = projectAt(2);
   const lower = { id: randomUUID(), order: 1 }; p.tracks.push(lower);
-  const upper = p.clips[0]!;
+  const upper = p.clips[0]! as Clip;
   const background: Clip = { ...upper, id: randomUUID(), trackId: lower.id, timelineStartSec: 0, durationSec: 5,
     parts: [{ assetId: asset.id, sourceInSec: 0, sourceOutSec: 1 }, { assetId: asset.id, sourceInSec: 2, sourceOutSec: 3 }, { assetId: asset.id, sourceInSec: 0, sourceOutSec: 3 }] };
   const adjacent: Clip = { ...upper, id: randomUUID(), timelineStartSec: 4, durationSec: 1,

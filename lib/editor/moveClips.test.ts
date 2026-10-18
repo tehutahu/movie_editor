@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { groupMoveSnapshot, matchesGroupMoveSnapshot, moveClips, planGroupMove, resolveGroupMove } from "./moveClips";
 import { createEmptyProject } from "./project";
 import { createCommandHistory, dispatchCommand, getCurrentProject, undo, redo, updateEditorView } from "./commandHistory";
-import type { Clip, EditorProject } from "./types";
+import type { MediaClip as Clip, EditorProject } from "./types";
 function project(): EditorProject {
  const p=createEmptyProject();p.tracks=[{id:"t0",order:0},{id:"t1",order:1}];p.assets=[{id:"a",kind:"video",ext:"mp4",displayName:"a",streamUrl:"/x",sourceDurationSec:5,sourceJobId:"restore"}];
  const c=(id:string,trackId:string,timelineStartSec:number,extra:Partial<Clip>={}):Clip=>({id,trackId,timelineStartSec,durationSec:1,parts:[{assetId:"a",sourceInSec:.5,sourceOutSec:1.5}],transform:{x:.5,y:.5,scale:2},...extra});

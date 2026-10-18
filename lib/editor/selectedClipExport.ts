@@ -6,6 +6,7 @@ import { fitClipTransformToCanvas, compositionSizeFromAsset } from "./compositor
  * matching the existing single-video export. Mixed parts share one output size.
  */
 export function selectedClipExportRequest(project: EditorProject, clip: Clip) {
+  if (clip.kind === "title" || project.clips.some(c => project.selectedClipIds.includes(c.id) && c.kind === "title")) throw new Error("タイトルを含む選択では素材DLできません。全体書き出しを使用してください。");
   if (!clip.parts.length) throw new Error("クリップに素材がありません。");
   const assets = clip.parts.map((part) => {
     const asset = project.assets.find((a) => a.id === part.assetId);

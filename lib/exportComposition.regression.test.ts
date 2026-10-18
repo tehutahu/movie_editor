@@ -9,7 +9,7 @@ import { selectedClipExportRequest } from "./editor/selectedClipExport";
 import { parseCompositionExportPayload } from "./editor/validateExportProject";
 import { exportCompositionToFile } from "./exportComposition";
 import { probeVideo } from "./ffmpeg";
-import type { Asset, Clip, EditorProject } from "./editor/types";
+import type { Asset, MediaClip as Clip, EditorProject } from "./editor/types";
 const sources = vi.hoisted(() => new Map<string, string>());
 vi.mock("@/lib/assetResolve", () => ({ resolveAssetInputPath: async (a: Asset) => sources.get(a.id) ?? null }));
 const real = process.env.RUN_FFMPEG_TESTS === "1";
@@ -73,7 +73,7 @@ it("rejects missing input, instead of silently skipping a clip", async () => {
 });
 
 it.skipIf(!real)("real ffmpeg: image-first clip retains later video/audio; image-only export is timed", async () => {
-  const imageFirst = { ...clip, durationSec: 2, parts: [clip.parts[1]!, clip.parts[2]!] };
+  const imageFirst = { ...clip, durationSec: 2, parts: [clip.parts![1]!, clip.parts![2]!] };
   const project = parseCompositionExportPayload(selectedClipExportRequest(p, imageFirst).body).project;
   project.compositionWidth = 320; project.compositionHeight = 320;
   const jobDir = path.join(dir, "image-first"); await mkdir(jobDir);
@@ -85,7 +85,7 @@ it.skipIf(!real)("real ffmpeg: image-first clip retains later video/audio; image
   let energy = 0;
   for (let i = 0; i < pcm.length; i += 2) energy += pcm.readInt16LE(i) ** 2;
   expect(Math.sqrt(energy / (pcm.length / 2))).toBeGreaterThan(500);
-  const onlyImage = { ...imageFirst, durationSec: 1, parts: [clip.parts[1]!] };
+  const onlyImage = { ...imageFirst, durationSec: 1, parts: [clip.parts![1]!] };
   const stillProject = parseCompositionExportPayload(selectedClipExportRequest(p, onlyImage).body).project;
   stillProject.compositionWidth = 320; stillProject.compositionHeight = 320;
   const stillDir = path.join(dir, "image-only"); await mkdir(stillDir);
@@ -103,7 +103,7 @@ it.skipIf(!real)("real ffmpeg: missing later source and out-of-range parts fail 
   await expect(exportCompositionToFile({ project, jobDir, outputPath: path.join(jobDir, "out.mp4") })).rejects.toThrow(/素材/);
   sources.set(p.assets[1]!.id, source);
   // Keep the model duration consistent so this isolates the media-range guard.
-  project.clips[0]!.durationSec += 100 - project.clips[0]!.parts[2]!.sourceOutSec;
-  project.clips[0]!.parts[2]!.sourceOutSec = 100;
+  project.clips[0]!.durationSec += 100 - project.clips[0]!.parts![2]!.sourceOutSec;
+  project.clips[0]!.parts![2]!.sourceOutSec = 100;
   await expect(exportCompositionToFile({ project, jobDir, outputPath: path.join(jobDir, "out.mp4") })).rejects.toThrow(/長さ/);
 }, 120000);

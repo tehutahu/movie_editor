@@ -27,21 +27,21 @@ describe("merged clip resize regression #15", () => {
     expect(p).toEqual(before);
     const c = (result ?? p).clips[0]!;
     expect(c.durationSec).toBeCloseTo(duration);
-    expect(c.parts).toEqual(duration <= 3 ? [{ assetId: "a", sourceInSec: 0, sourceOutSec: duration }] : [p.clips[0]!.parts[0], { assetId: "b", sourceInSec: 2, sourceOutSec: duration - 1 }]);
-    expect(p.clips[0]!.parts).toHaveLength(2);
+    expect(c.parts!).toEqual(duration <= 3 ? [{ assetId: "a", sourceInSec: 0, sourceOutSec: duration }] : [p.clips[0]!.parts![0], { assetId: "b", sourceInSec: 2, sourceOutSec: duration - 1 }]);
+    expect(p.clips[0]!.parts!).toHaveLength(2);
     if (duration > 3) expect(partAndSourceAtClipOffset(c, 3)?.part.assetId).toBe("b");
   });
   it.each([["a", "b", 20, 9], ["i", "b", 8, 8], ["a", "i", 12, 12]])("extends only the tail (%s → %s)", (first, last, duration, expected) => {
     const p = fixture(first as string, last as string);
     const c = resizeClip(p, "c", duration as number, assets)!.clips[0]!;
     expect(c.durationSec).toBe(expected);
-    expect(c.parts[0]).toEqual(p.clips[0]!.parts[0]);
-    expect(c.parts[1]!.assetId).toBe(last);
+    expect(c.parts![0]).toEqual(p.clips[0]!.parts![0]);
+    expect(c.parts![1]!.assetId).toBe(last);
   });
   it("restores all parts through undo/redo after trim across a boundary", () => {
     const p = fixture("i");
     const h = dispatchCommand(createCommandHistory(p), { type: "resize", clipId: "c", newDurationSec: 4 })!.history;
-    expect(getCurrentProject(h).clips[0]!.parts[1]!.sourceOutSec).toBe(3);
+    expect(getCurrentProject(h).clips[0]!.parts![1]!.sourceOutSec).toBe(3);
     expect(getCurrentProject(undo(h)!).clips).toEqual(p.clips);
     expect(getCurrentProject(redo(undo(h)!)!).clips).toEqual(getCurrentProject(h).clips);
   });
@@ -52,7 +52,7 @@ it("extends the current tail after trimming across a boundary; Undo recovers dis
   for (const boundary of [2.99, 3, 3.01]) {
     const trimmed = resizeClip(p, "c", boundary, assets)!;
     const extended = resizeClip(trimmed, "c", 7, assets)!;
-    expect(extended.clips[0]!.parts.map((part) => part.assetId)).toEqual(boundary <= 3 ? ["a"] : ["a", "b"]);
+    expect(extended.clips[0]!.parts!.map((part) => part.assetId)).toEqual(boundary <= 3 ? ["a"] : ["a", "b"]);
     expect(extended.clips[0]!.durationSec).toBeCloseTo(7);
   }
 });

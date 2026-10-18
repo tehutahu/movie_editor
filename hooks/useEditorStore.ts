@@ -1,5 +1,7 @@
 "use client";
 
+import { isMediaClip } from "@/lib/editor/types";
+
 import { useRestoreInputAudio } from "@/hooks/useRestoreInputAudio";
 import { matchesClipAudioSnapshot, mergedAudioGain, type ClipAudioSnapshot } from "@/lib/editor/clipAudio";
 import { matchesGroupMoveSnapshot, type GroupMoveSnapshot } from "@/lib/editor/moveClips";
@@ -513,13 +515,14 @@ export function useEditorStore() {
     const snapshot = latestProjectRef.current;
     const snapshotHistory = latestHistoryRef.current;
     const ids = [...snapshot.selectedClipIds];
+    if (snapshot.clips.some(c => ids.includes(c.id) && !isMediaClip(c))) return;
     if (!ids.length || !snapshot.clips.some(c => ids.includes(c.id) && (c.layoutMode ?? "stretch") !== layoutMode)) return;
     const epoch = projectEpochRef.current;
     setError(null);
     try {
       if (layoutMode === "contain") {
         setLayoutChecking(true);
-        const assetIds = new Set(snapshot.clips.filter(c => ids.includes(c.id)).flatMap(c => c.parts.map(p => p.assetId)));
+        const assetIds = new Set(snapshot.clips.filter(isMediaClip).filter(c => ids.includes(c.id)).flatMap(c => c.parts.map(p => p.assetId)));
         await validateBrowserMediaLayouts(snapshot.assets.filter(a => assetIds.has(a.id)));
       }
       setHistory(h => {
@@ -567,7 +570,7 @@ export function useEditorStore() {
       }
       const clip = cur.clips.find((c) => c.id === selectedId);
       if (!clip) return h;
-      const asset = findAsset(cur.assets, clip.parts[0]?.assetId ?? "");
+      const asset = findAsset(cur.assets, clip.parts?.[0]?.assetId ?? "");
       if (!asset?.width || !asset?.height) {
         setError("選択クリップの素材解像度が不明です。");
         return h;
@@ -597,6 +600,7 @@ export function useEditorStore() {
       return;
     }
 
+    if (cur.clips.some(c => clipIds.includes(c.id) && !isMediaClip(c))) { setError("タイトルを含む選択では素材DLできません。全体書き出しを使用してください。"); return; }
     setBusy(
       clipIds.length > 1
         ? `選択クリップを書き出し中… (0/${clipIds.length})`
@@ -661,13 +665,14 @@ export function useEditorStore() {
     setError(null);
     const snapshotHistory = latestHistoryRef.current;
     const cur = getCurrentProject(snapshotHistory);
+    if (cur.clips.some(c => cur.selectedClipIds.includes(c.id) && !isMediaClip(c))) { setError("タイトルは速度復元できません。"); return; }
     const clipId = cur.selectedClipIds[0];
     if (!clipId) {
       setError("速度復元する動画クリップを選択してください。");
       return;
     }
     const clip = cur.clips.find((c) => c.id === clipId);
-    const asset = cur.assets.find((a) => a.id === clip?.parts[0]?.assetId);
+    const asset = cur.assets.find((a) => a.id === clip?.parts?.[0]?.assetId);
     if (!clip || !asset || asset.kind !== "video") {
       setError("動画クリップを選択してください。");
       return;

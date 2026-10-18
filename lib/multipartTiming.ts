@@ -42,6 +42,7 @@ export function planMultipartVideo(clip: Clip): MultipartVideoPlan {
   const start = decimal(clip.timelineStartSec), declared = decimal(clip.durationSec);
   let offset: Decimal = { n: ZERO, d: ONE };
   let legacySum = 0, arithmeticBudget = 2 * ulpBound(clip.durationSec);
+  if (clip.kind === "title") throw new Error("タイトルには素材partがありません。");
   const parts = clip.parts.map(part => {
     const duration = subtract(decimal(part.sourceOutSec), decimal(part.sourceInSec));
     if (duration.n <= ZERO) throw precisionError();

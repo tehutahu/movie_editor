@@ -369,7 +369,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     [requestDraw],
   );
 
-  const layoutSources = JSON.stringify(project.assets.filter(a => project.clips.some(c => c.layoutMode === "contain" && c.parts.some(p => p.assetId === a.id))));
+  const layoutSources = JSON.stringify(project.assets.filter(a => project.clips.some(c => c.layoutMode === "contain" && c.parts?.some(p => p.assetId === a.id))));
   const [layouts, setLayouts] = useState<{ key: string; values: Map<string, MediaLayout>; error?: string }>({ key: "", values: new Map() });
   const layoutsRef = useRef(layouts);
   layoutsRef.current = layouts;

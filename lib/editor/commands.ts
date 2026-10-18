@@ -1,3 +1,5 @@
+import { addTitle, updateTitle } from "./title";
+import { isMediaClip } from "./types";
 import { setClipAudioGain } from "@/lib/editor/clipAudio";
 import { moveClips } from "@/lib/editor/moveClips";
 import { trimClipStart, trimStartReason } from "@/lib/editor/trimClipStart";
@@ -17,6 +19,8 @@ import {
 import { addTrackToProject, deleteEmptyTrackFromProject } from "@/lib/editor/project";
 
 export type EditorCommand =
+  | { type: "addTitle"; id: string; text: string }
+  | { type: "titleText"; clipId: string; text: string }
   | { type: "trimStart"; clipId: string; atSec: number }
   | { type: "split"; clipId: string; atSec: number }
   | { type: "merge"; clipIds: string[] }
@@ -47,6 +51,8 @@ export function applyCommand(
   command: EditorCommand,
 ): EditorProject | null {
   switch (command.type) {
+    case "addTitle": return addTitle(project, command.id, command.text);
+    case "titleText": return updateTitle(project, command.clipId, command.text);
     case "trimStart": {
       if (project.selectedClipIds.length !== 1 || project.selectedClipIds[0] !== command.clipId ||
           trimStartReason({ ...project, playheadSec: command.atSec }, false)) return null;
@@ -70,8 +76,9 @@ export function applyCommand(
     case "layoutMode": {
       if (command.layoutMode !== "stretch" && command.layoutMode !== "contain") return null;
       const ids = new Set(command.clipIds);
+      if (project.clips.some(c => ids.has(c.id) && !isMediaClip(c))) return null;
       if (!project.clips.some(c => ids.has(c.id) && (c.layoutMode ?? "stretch") !== command.layoutMode)) return null;
-      return { ...project, clips: project.clips.map(c => ids.has(c.id) ? { ...c, layoutMode: command.layoutMode } : c) };
+      return { ...project, clips: project.clips.map(c => ids.has(c.id) && isMediaClip(c) ? { ...c, layoutMode: command.layoutMode } : c) };
     }
     case "delete":
       return deleteClips(project, command.clipIds);

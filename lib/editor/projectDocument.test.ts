@@ -109,10 +109,10 @@ describe("versioned save DTO", () => {
         doc.project.tracks.push(doc.project.tracks[0]);
         break;
       case "reference":
-        doc.project.clips[0].parts[0].assetId = randomUUID();
+        doc.project.clips[0].parts![0].assetId = randomUUID();
         break;
       case "interval":
-        doc.project.clips[0].parts[0].sourceOutSec = 100;
+        doc.project.clips[0].parts![0].sourceOutSec = 100;
         break;
       case "numeric":
         doc.project.clips[0].transform.scale = NaN;

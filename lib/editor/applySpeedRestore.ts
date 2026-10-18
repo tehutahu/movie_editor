@@ -1,3 +1,4 @@
+import { isMediaClip } from "./types";
 import { computeCompositionDuration } from "@/lib/editor/project";
 import { MIN_CLIP_DURATION_SEC, type ClipPart, type EditorProject } from "@/lib/editor/types";
 import { assertRestoreResult, type RestoreResult } from "./restoreResult";
@@ -82,6 +83,7 @@ export function applySpeedRestoreToProject(
   asset.height = restoredHeight;
 
   for (const clip of next.clips) {
+    if (!isMediaClip(clip)) continue;
     if (!clip.parts.some(part => part.assetId === assetId)) continue;
     const trace: number[] = [];
     const oldSum = partSum(clip.parts, trace);

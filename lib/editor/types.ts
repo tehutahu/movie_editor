@@ -36,17 +36,36 @@ export type ClipPart = {
 
 export type ClipLayoutMode = "stretch" | "contain";
 
-export type Clip = {
+export type ClipBase = {
   id: string;
   trackId: string;
   timelineStartSec: number;
   durationSec: number;
-  parts: ClipPart[];
   transform: ClipTransform;
+};
+
+export type MediaClip = ClipBase & {
+  kind?: "media";
+  parts: ClipPart[];
   layoutMode?: ClipLayoutMode;
   /** Linear audio gain; omitted means 1, zero silences without changing selection. */
   audioGain?: number;
 };
+
+export type TitleClip = ClipBase & {
+  kind: "title";
+  text: string;
+  fontId: string;
+  fontRevision: string;
+  styleRevision: string;
+  /** These media fields are forbidden in title descriptors. */
+  parts?: never;
+  audioGain?: never;
+  layoutMode?: never;
+};
+export type Clip = MediaClip | TitleClip;
+export function isMediaClip(clip: Clip): clip is MediaClip { return clip.kind !== "title"; }
+export function isTitleClip(clip: Clip): clip is TitleClip { return clip.kind === "title"; }
 
 export type EditorProject = {
   assets: Asset[];

@@ -1,3 +1,4 @@
+import { isMediaClip, type MediaClip } from "./types";
 import type { Asset, Clip, ClipTransform, EditorProject, Track } from "@/lib/editor/types";
 import { findAsset, tracksSortedForPreview } from "@/lib/editor/project";
 import { getClipAtPlayhead, partAndSourceAtClipOffset } from "@/lib/editor/clipOps";
@@ -100,7 +101,7 @@ export function fitClipTransformToCanvas(): ClipTransform {
 }
 
 export type ExportCompositionLayer = {
-  clip: Clip;
+  clip: MediaClip;
   asset: Asset;
   trackOrder: number;
 };
@@ -109,7 +110,7 @@ export function clipsForExportComposition(project: EditorProject): ExportComposi
   const trackOrderMap = new Map(project.tracks.map((t) => [t.id, t.order]));
   const layers: ExportCompositionLayer[] = [];
 
-  for (const clip of project.clips) {
+  for (const clip of project.clips.filter(isMediaClip)) {
     const assetId = clip.parts[0]?.assetId;
     if (!assetId) continue;
     const asset = findAsset(project.assets, assetId);
@@ -131,7 +132,7 @@ export function resolveAudioTrackForExport(project: EditorProject): Track | unde
   const tracks = tracksSortedForPreview(project.tracks);
   for (const track of tracks) {
     const hasVideo = project.clips.some((clip) => {
-      if (clip.trackId !== track.id) return false;
+      if (!isMediaClip(clip) || clip.trackId !== track.id) return false;
       return clip.parts.some((part) => findAsset(project.assets, part.assetId)?.kind === "video");
     });
     if (hasVideo) return track;
@@ -262,7 +263,7 @@ export function transformFromResize(
 }
 
 export type ActiveClipLayer = {
-  clip: Clip;
+  clip: MediaClip;
   asset: Asset;
   sourceTimeSec: number;
   trackOrder: number;
@@ -275,7 +276,7 @@ export function resolveActiveClipsAtPlayhead(
   const trackOrderMap = new Map(project.tracks.map((t) => [t.id, t.order]));
   const layers: ActiveClipLayer[] = [];
 
-  for (const clip of project.clips) {
+  for (const clip of project.clips.filter(isMediaClip)) {
     if (!getClipAtPlayhead(clip, playheadSec)) continue;
     const rel = playheadSec - clip.timelineStartSec;
     const resolved = partAndSourceAtClipOffset(clip, rel);
@@ -305,7 +306,7 @@ export function resolveAudioClipAtPlayhead(
   const tracks = tracksSortedForPreview(project.tracks);
   for (const track of tracks) {
     const clip = project.clips.find(
-      (c) => c.trackId === track.id && getClipAtPlayhead(c, playheadSec),
+      (c) => isMediaClip(c) && c.trackId === track.id && getClipAtPlayhead(c, playheadSec),
     );
     if (!clip) continue;
     const rel = playheadSec - clip.timelineStartSec;

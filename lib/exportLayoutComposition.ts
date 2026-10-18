@@ -1,3 +1,4 @@
+import { isMediaClip, type MediaClip } from "./editor/types";
 import { audioGainFilter } from "@/lib/editor/clipAudio";
 /** Opt-in layout renderer. All-stretch compositions use the unchanged legacy renderer. */
 import path from "node:path";
@@ -28,7 +29,7 @@ async function media(asset: Asset) {
 }
 /** Revalidate actual media before registering a layout job; never trust client dimensions. */
 export async function validateContainMedia(project: EditorProject): Promise<void> {
-  const ids = new Set(project.clips.filter(c => c.layoutMode === "contain").flatMap(c => c.parts.map(p => p.assetId)));
+  const ids = new Set(project.clips.filter(isMediaClip).filter(c => c.layoutMode === "contain").flatMap(c => c.parts.map(p => p.assetId)));
   for (const a of project.assets) if (ids.has(a.id)) await media(a);
 }
 async function concat(files: string[], output: string, video: boolean, durations?: number[]) {
@@ -40,7 +41,7 @@ async function concat(files: string[], output: string, video: boolean, durations
 }
 
 type Prepared = { file: string; clip: Clip; matte: boolean; audio: boolean; rect: ReturnType<typeof rectFor> };
-async function prepareContain(clip: Clip, project: EditorProject, dir: string, ci: number, audio: boolean): Promise<Prepared> {
+async function prepareContain(clip: MediaClip, project: EditorProject, dir: string, ci: number, audio: boolean): Promise<Prepared> {
   const rect = rectFor(clip, project), videos: string[] = [], durations: number[] = [], audios: string[] = [];
   let offset = clip.timelineStartSec;
   for (const [pi, part] of clip.parts.entries()) {

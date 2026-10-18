@@ -589,7 +589,7 @@ export function MultiTrackTimeline({ editor }: { editor: EditorStore }) {
                 return st.trackId === track.id;
               })
               .map((clip) => {
-                const asset = project.assets.find((a) => a.id === clip.parts[0]?.assetId);
+                const asset = project.assets.find((a) => a.id === clip.parts?.[0]?.assetId);
                 const selected = project.selectedClipIds.includes(clip.id);
                 const st = clipDisplayState(clip.id, clip);
                 const offset = filmstripOffsetPercent({
