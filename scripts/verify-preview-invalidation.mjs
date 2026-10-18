@@ -1,10 +1,11 @@
-/* global document, window, CanvasRenderingContext2D, Event */
+/* global document, window, CanvasRenderingContext2D, Event, requestAnimationFrame */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import console from 'node:console';
 import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
+import { visiblePointerPoint, dragToVisibleTarget } from './browser-pointer.mjs';
 const suite = verification('preview-invalidation', 3126);
 const { evidence, baseURL, ff } = suite;
 let page;
@@ -58,7 +59,7 @@ function check(name, value = true) {
   let releaseImage;
   const imageReady = new Promise(resolve => { releaseImage = resolve; });
   await page.route('**/api/assets/*/stream', async route => { await imageReady; await route.continue(); });
-  await page.locator('.asset-card').dragTo(page.locator('.timeline-track-row').last(), { targetPosition: { x: 48, y: 30 } });
+  await dragToVisibleTarget(page, page.locator('.asset-card'), page.locator('.timeline-track-row').last(), { targetPosition: { x: 48, y: 30 } });
   await page.locator('.timeline-clip').waitFor();
   releaseImage();
   await page.waitForFunction(() => {
@@ -77,9 +78,9 @@ function check(name, value = true) {
   await page.waitForFunction(previous => document.querySelector('canvas').toDataURL() !== previous, beforeSelection.pixels);
   check('selection invalidates transform handles');
   const selected = await canvasState();
-  const box = await page.locator('canvas').boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + 50, box.y + box.height / 2);
+  const point = await visiblePointerPoint(page, page.locator('canvas'));
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down(); await page.mouse.move(point.x + 50, point.y);
   await page.waitForFunction(previous => document.querySelector('canvas').toDataURL() !== previous, selected.pixels);
   await captureEvidenceScreenshot(page, `${evidence}/transform-drag.png`);
   await page.mouse.up();
@@ -88,11 +89,31 @@ function check(name, value = true) {
   await page.waitForFunction(previous => document.querySelector('canvas').toDataURL() !== previous, moved.pixels);
   check('transform preview, release and Undo redraw while stopped');
   await page.setViewportSize({ width: 1280, height: 900 });
+  const resizeGeometry = [];
+  const expectCurrentFit = async phase => {
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const available = await page.locator('.compositor-canvas-wrap').evaluate(el => ({ width: el.clientWidth, height: el.clientHeight }));
+    // The first synthetic image is 160x120; auto-match preserves its 4:3 frame.
+    const unit = Math.min(available.width / 4, available.height / 3);
+    const expected = { width: Math.max(1, Math.round(4 * unit)), height: Math.max(1, Math.round(3 * unit)) };
+    await page.waitForFunction(expected => { const canvas = document.querySelector('canvas'); return canvas.width === expected.width && canvas.height === expected.height; }, expected);
+    const actual = await canvasState();
+    resizeGeometry.push({ phase, viewport: page.viewportSize(), available, expected, actual: { width: actual.width, height: actual.height } });
+    fs.writeFileSync(`${evidence}/resize-geometry.json`, JSON.stringify(resizeGeometry, null, 2));
+    return actual;
+  };
+  const currentViewport = await expectCurrentFit('current viewport before override');
   await page.locator('.compositor-canvas-wrap').evaluate(element => { element.style.flex = 'none'; element.style.height = '120px'; element.style.minHeight = '0px'; });
-  await page.waitForFunction(previous => document.querySelector('canvas').width !== previous, selected.width);
+  await expectCurrentFit('explicit 120px container');
+  await page.waitForFunction(previous => document.querySelector('canvas').width !== previous, currentViewport.width);
   check('container resize redraws canvas dimensions');
+  const paintsBeforeContainerRestore = await page.evaluate(() => window.__preview.paints);
   await page.locator('.compositor-canvas-wrap').evaluate(element => { element.style.flex = ''; element.style.height = ''; element.style.minHeight = ''; });
-  await page.waitForFunction(previous => document.querySelector('canvas').width === previous, selected.width);
+  const restoredViewport = await expectCurrentFit('current viewport after restore');
+  assert.equal(restoredViewport.width, currentViewport.width);
+  assert.equal(restoredViewport.height, currentViewport.height);
+  assert.equal(restoredViewport.pixels, currentViewport.pixels);
+  check('restoring the current viewport container repaints the same canonical frame', await page.evaluate(() => window.__preview.paints) > paintsBeforeContainerRestore);
   const paintsBeforeVisibility = await page.evaluate(() => window.__preview.paints);
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await page.waitForFunction(previous => window.__preview.paints > previous, paintsBeforeVisibility);
@@ -113,12 +134,23 @@ function check(name, value = true) {
   check('fullscreen button entry and browser API exit redraw canvas dimensions');
   await page.locator('.asset-library input[type=file]').setInputFiles(`${evidence}/moving.mp4`);
   await page.waitForFunction(() => document.querySelectorAll('.asset-card').length === 2 && !document.querySelector('.asset-library input').disabled);
-  await page.locator('.asset-card').filter({ hasText: 'moving' }).dragTo(page.locator('.timeline-track-row').first(), { targetPosition: { x: 48, y: 30 } });
+  await dragToVisibleTarget(page, page.locator('.asset-card').filter({ hasText: 'moving' }), page.locator('.timeline-track-row').first(), { targetPosition: { x: 48, y: 30 } });
+  await page.waitForFunction(() => document.querySelectorAll('.timeline-clip').length === 2 &&
+    document.querySelector('.timeline-track-row .timeline-clip')?.textContent === 'moving');
+  const savedSetup = page.waitForResponse(response => response.url().endsWith('/api/projects') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: '新しい保存版を保存', exact: true }).click();
+  const setupResponse = await savedSetup; assert(setupResponse.ok());
+  const { document: setup } = await setupResponse.json();
+  const movingAsset = setup.project.assets.find(asset => asset.displayName === 'moving');
+  const frontTrack = [...setup.project.tracks].sort((a, b) => a.order - b.order)[0];
+  assert(movingAsset && setup.project.clips.some(clip => clip.trackId === frontTrack.id && clip.parts.some(part => part.assetId === movingAsset.id)),
+    'native drop places the actual moving-video asset on T1');
+  fs.writeFileSync(`${evidence}/video-setup-project.json`, JSON.stringify(setup, null, 2));
+  await page.waitForFunction(() => !document.querySelector('.busy-banner'));
   await page.waitForFunction(() => window.__preview.videos.some(video => video.readyState >= 2 && video.videoWidth > 0));
   const seek = async sec => {
-    const scroll = await page.locator('.timeline-scroll').boundingBox();
-    const ruler = await page.locator('.timeline-ruler').boundingBox();
-    await page.mouse.click(scroll.x + 48 + sec * 80, ruler.y + 8);
+    const point = await visiblePointerPoint(page, page.locator('.timeline-scroll'), { x: 48 + sec * 80, y: 8 });
+    await page.mouse.click(point.x, point.y);
   };
   const firstVideo = await canvasState();
   const beforeSeek = await page.evaluate(() => window.__preview.videoSeeks);

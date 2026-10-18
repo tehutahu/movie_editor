@@ -5,6 +5,7 @@ import console from 'node:console';
 import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
+import { visiblePointerPoint, dragToVisibleTarget } from './browser-pointer.mjs';
 const suite=verification('multipart-boundaries',3158),{evidence,baseURL,ff}=suite;
 const checks=[],errors=[];let page;
 function check(name,condition=true){assert(condition,name);checks.push(name);console.log('PASS',name);fs.writeFileSync(`${evidence}/results.json`,JSON.stringify({checks,errors},null,2));}
@@ -15,11 +16,11 @@ function owner(file,n){const rgb=ff(['-i',file,'-vf',`select=eq(n\\,${n}),scale=
   for(const [name,color,fps]of[['a','red',24],['b','blue',30]])ff(['-y','-f','lavfi','-i',`color=${color}:s=320x320:r=${fps}:d=3`,'-f','lavfi','-i',`sine=frequency=${name==='a'?440:880}:duration=3`,'-c:v','libx264','-c:a','aac',`${evidence}/${name}.mp4`]);
   await suite.start();const browser=await suite.launch();page=await browser.newPage({viewport:{width:1600,height:1000}});page.on('pageerror',e=>errors.push(e.message));await page.goto(baseURL);
   await page.locator('.asset-library input[type=file]').setInputFiles([`${evidence}/a.mp4`,`${evidence}/b.mp4`]);await page.waitForFunction(()=>document.querySelectorAll('.asset-card').length===2&&!document.querySelector('.busy-banner'));
-  await page.locator('.asset-card').first().dragTo(page.locator('.timeline-track-row').first(),{targetPosition:{x:48,y:30}});await page.locator('.timeline-clip').waitFor();
+  await dragToVisibleTarget(page, page.locator('.asset-card').first(), page.locator('.timeline-track-row').first(),{targetPosition:{x:48,y:30}});await page.locator('.timeline-clip').waitFor();
   const doc=await save(),a=doc.project.assets.find(a=>a.displayName==='a'),b=doc.project.assets.find(a=>a.displayName==='b');assert(a&&b);
   Object.assign(doc.project,{compositionWidth:320,compositionHeight:320,compositionDurationSec:4});Object.assign(doc.project.clips[0],{timelineStartSec:1.75,durationSec:1.25,parts:[{assetId:a.id,sourceInSec:1,sourceOutSec:1.25},{assetId:b.id,sourceInSec:.5,sourceOutSec:1.5}],transform:{x:.5,y:.5,scale:2}});
   const file=`${evidence}/input.json`;fs.writeFileSync(file,JSON.stringify(doc));await page.locator('.project-persistence input[type=file]').setInputFiles(file);await page.waitForFunction(()=>!document.querySelector('.busy-banner'));assert.deepEqual(await page.locator('.error-banner').allTextContents(),[]);
-  await page.locator('.timeline-clip').click({position:{x:25,y:10}});const scroll=await page.locator('.timeline-scroll').boundingBox();await page.mouse.click(scroll.x+48+80*2,scroll.y+8);
+  await page.locator('.timeline-clip').click({position:{x:25,y:10}});const point=await visiblePointerPoint(page,page.locator('.timeline-scroll'),{x:48+80*2,y:8});await page.mouse.click(point.x,point.y);
   await page.waitForFunction(()=>{const c=document.querySelector('.compositor-preview canvas');if(!c)return false;const d=c.getContext('2d').getImageData(c.width/2,c.height/2,1,1).data;return d[2]>d[0];});check('loaded multipart Canvas shows B at the intended 2s boundary');
   const request={...doc.project,assets:doc.project.assets.map(a=>({...a,storageAssetId:a.media.id}))};const response=await page.request.post(`${baseURL}/api/jobs/export-composition`,{data:request});assert(response.ok(),await response.text());const out=await job((await response.json()).jobId,'composition');
   check('full composition uses A immediately before and B at the intended global boundary',owner(out,59)==='A'&&owner(out,60)==='B');

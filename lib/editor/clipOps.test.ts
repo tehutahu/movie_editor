@@ -37,7 +37,7 @@ describe("clipOps", () => {
     expect(merged).not.toBeNull();
     expect(merged!.clips).toHaveLength(1);
     expect(merged!.clips[0]!.durationSec).toBeCloseTo(5, 2);
-    expect(merged!.clips[0]!.parts).toHaveLength(2);
+    expect(merged!.clips[0]!.parts!).toHaveLength(2);
   });
 
   it("merges non-adjacent clips in timeline order", () => {
@@ -57,8 +57,8 @@ describe("clipOps", () => {
     expect(merged!.clips).toHaveLength(1);
     expect(merged!.clips[0]!.timelineStartSec).toBe(0);
     expect(merged!.clips[0]!.durationSec).toBeCloseTo(5, 2);
-    expect(merged!.clips[0]!.parts[0]!.assetId).toBe("a1");
-    expect(merged!.clips[0]!.parts[1]!.assetId).toBe("a2");
+    expect(merged!.clips[0]!.parts![0]!.assetId).toBe("a1");
+    expect(merged!.clips[0]!.parts![1]!.assetId).toBe("a2");
   });
 
   it("prevents overlap when moving on same track", () => {

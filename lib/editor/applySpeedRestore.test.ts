@@ -34,7 +34,7 @@ describe("applySpeedRestoreToProject", () => {
     expect(next.assets[0]!.sourceJobId).toBe("job-restore-1");
     expect(next.assets[0]!.sourceDurationSec).toBe(20);
     expect(next.clips[0]!.durationSec).toBeCloseTo(20, 2);
-    expect(next.clips[0]!.parts[0]!.sourceOutSec).toBeCloseTo(20, 2);
+    expect(next.clips[0]!.parts![0]!.sourceOutSec).toBeCloseTo(20, 2);
     expect(next.compositionDurationSec).toBeCloseTo(20, 2);
   });
 });
@@ -61,7 +61,7 @@ it("restores shared asset dimensions and source in one history entry; Undo/Redo 
   for (let i = 0; i < 2; i++) {
     expect(result.project.clips[i]).toMatchObject({ timelineStartSec: p.clips[i].timelineStartSec,
       transform: p.clips[i].transform, durationSec: 20 });
-    expect(result.project.clips[i].parts[0]).toMatchObject({ assetId: original.id, sourceOutSec: 20 });
+    expect(result.project.clips[i].parts![0]).toMatchObject({ assetId: original.id, sourceOutSec: 20 });
   }
   expect(p).toEqual(before);
   const undone = undo(result.history)!;

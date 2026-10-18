@@ -2,6 +2,7 @@ import { mergedAudioGain } from "./clipAudio";
 import type { Asset, Clip, ClipPart, EditorProject } from "@/lib/editor/types";
 import { newId } from "@/lib/newId";
 import {
+  isMediaClip,
   DEFAULT_TRANSFORM,
   MIN_CLIP_DURATION_SEC,
   SPLIT_EDGE_EPS_SEC,
@@ -20,6 +21,7 @@ export function partAndSourceAtClipOffset(
   clip: Clip,
   timelineOffsetSec: number,
 ): { part: ClipPart; sourceSec: number } | null {
+  if (!isMediaClip(clip)) return null;
   const mapped = mapPartAtTimelineOffset(clip, timelineOffsetSec);
   if (!mapped) return null;
   const part = clip.parts[mapped.partIndex];
@@ -89,6 +91,7 @@ function mapPartAtTimelineOffset(
   clip: Clip,
   timelineOffsetSec: number,
 ): { partIndex: number; sourceSec: number } | null {
+  if (!isMediaClip(clip)) return null;
   let cursor = 0;
   for (let i = 0; i < clip.parts.length; i++) {
     const part = clip.parts[i]!;
@@ -149,6 +152,14 @@ export function splitClipAtPlayhead(
   const rel = atSec - clip.timelineStartSec;
   if (rel <= SPLIT_EDGE_EPS_SEC || rel >= clip.durationSec - SPLIT_EDGE_EPS_SEC) return null;
 
+  if (!isMediaClip(clip)) {
+    const left = { ...clip, id: newId(), durationSec: rel };
+    const right = { ...clip, id: newId(), timelineStartSec: atSec, durationSec: clip.durationSec - rel };
+    const next = cloneProject(project);
+    next.clips = next.clips.flatMap(c => c.id === clipId ? [left, right] : [c]);
+    next.selectedClipIds = [left.id, right.id];
+    return next;
+  }
   const split = splitPartsAt(clip.parts, rel);
   if (!split) return null;
   const [leftParts, rightParts] = split;
@@ -183,7 +194,7 @@ export function mergeClips(
 ): EditorProject | null {
   if (clipIds.length < 2) return null;
   const clips = clipIds.map((id) => project.clips.find((c) => c.id === id)).filter(Boolean) as Clip[];
-  if (clips.length !== clipIds.length) return null;
+  if (clips.length !== clipIds.length || !clips.every(isMediaClip)) return null;
 
   if (!clips.every(c => (c.layoutMode ?? "stretch") === (clips[0]!.layoutMode ?? "stretch"))) return null;
   const trackId = clips[0]!.trackId;
@@ -333,7 +344,16 @@ export function resizeClip(
 ): EditorProject | null {
   const clip = project.clips.find((c) => c.id === clipId);
   if (!clip) return null;
-  if (!Number.isFinite(newDurationSec) || clip.parts.length === 0) return null;
+  if (!Number.isFinite(newDurationSec)) return null;
+  if (!isMediaClip(clip)) {
+    const durationSec = Math.max(MIN_CLIP_DURATION_SEC, newDurationSec);
+    if (durationSec === clip.durationSec || clip.timelineStartSec + durationSec > 86400) return null;
+    const next = cloneProject(project);
+    next.clips = next.clips.map(c => c.id === clipId ? { ...c, durationSec } : c);
+    next.compositionDurationSec = computeCompositionDuration(next.clips);
+    return next;
+  }
+  if (clip.parts.length === 0) return null;
   const dur = Math.max(MIN_CLIP_DURATION_SEC, newDurationSec);
   const parts: ClipPart[] = [];
   let remaining = dur;
@@ -361,7 +381,7 @@ export function resizeClip(
         part.sourceInSec === clip.parts[i]!.sourceInSec && part.sourceOutSec === clip.parts[i]!.sourceOutSec)) return null;
   const next = cloneProject(project);
   next.clips = next.clips.map((c) => c.id === clipId ? {
-    ...c,
+    ...clip,
     durationSec,
     parts,
   } : c);
@@ -413,7 +433,7 @@ export function sourceTimeAtPlayhead(clip: Clip, playheadSec: number): number | 
 }
 
 export function createClipWithDefaultTransform(
-  partial: Omit<Clip, "transform">,
+  partial: Omit<import("./types").MediaClip, "transform">,
 ): Clip {
   return { ...partial, transform: { ...DEFAULT_TRANSFORM } };
 }

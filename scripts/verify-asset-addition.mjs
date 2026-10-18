@@ -6,6 +6,7 @@ import console from 'node:console';
 import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
+import { visiblePointerPoint, dragToVisibleTarget } from './browser-pointer.mjs';
 const suite = verification('asset-addition', 3106);
 const { evidence, baseURL, ff } = suite;
 const checks = [], errors = [];
@@ -72,8 +73,8 @@ function check(name, ok = true) {
   const mixed = structuredClone(first); mixed.project.clips = [block(0, 4, t1), block(4, 2, t1), block(0, 2, t2)];
   await load(mixed, 'two-tracks');
   const seek = async sec => {
-    const r = await page.locator('.timeline-ruler').boundingBox();
-    await page.mouse.click(r.x + 48 + sec * 80, r.y + 8);
+    const point = await visiblePointerPoint(page, page.locator('.timeline-scroll'), { x: 48 + sec * 80, y: 8 });
+    await page.mouse.click(point.x, point.y);
   };
   await seek(3.95); await video().click(); await waitCount(4);
   await page.locator('.asset-add-status').filter({ hasText: 'T1の6秒へ追加しました。' }).waitFor();
@@ -94,11 +95,11 @@ function check(name, ok = true) {
   await page.waitForFunction(() => !document.querySelector('.asset-add-button').disabled);
   check('adding an empty track re-enables the current T1 action', await video().isEnabled());
   // A pointer drag beginning on the button must not become an asset-card drag.
-  let box = await video().boundingBox(); const row = await page.locator('.timeline-track-row').first().boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+  const point = await visiblePointerPoint(page, video()); const row = await page.locator('.timeline-track-row').first().boundingBox();
+  await page.mouse.move(point.x, point.y); await page.mouse.down();
   await page.mouse.move(row.x + 160, row.y + 20, { steps: 12 }); await page.mouse.up();
   check('dragging from the native action button does not create a clip', await count() === 0);
-  await page.locator('.asset-card').filter({ hasText: 'source' }).dragTo(page.locator('.timeline-track-row').first(), { targetPosition: { x: 48, y: 30 } });
+  await dragToVisibleTarget(page, page.locator('.asset-card').filter({ hasText: 'source' }), page.locator('.timeline-track-row').first(), { targetPosition: { x: 48, y: 30 } });
   await waitCount(1); check('existing card drag/drop still adds one clip', await count() === 1);
   // Hold upload in flight: the button follows actual busy state.
   let release; const held = new Promise(resolve => { release = resolve; });

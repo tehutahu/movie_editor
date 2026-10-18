@@ -1,5 +1,9 @@
 "use client";
 
+import { isMediaClip } from "@/lib/editor/types";
+import { validateTitleText, titleDescriptor, matchesTitleEditSnapshot, type TitleEditSnapshot } from "@/lib/editor/title";
+import { requestTitleRaster } from "@/lib/editor/titleRasterClient";
+
 import { useRestoreInputAudio } from "@/hooks/useRestoreInputAudio";
 import { matchesClipAudioSnapshot, mergedAudioGain, type ClipAudioSnapshot } from "@/lib/editor/clipAudio";
 import { matchesGroupMoveSnapshot, type GroupMoveSnapshot } from "@/lib/editor/moveClips";
@@ -489,10 +493,39 @@ export function useEditorStore() {
     if (areEditorShortcutsBlocked()) return;
     setHistory(h => {
       const current = getCurrentProject(h);
+      if (current.clips.some(c=>current.selectedClipIds.includes(c.id)&&!isMediaClip(c))) return h;
       if (areEditorShortcutsBlocked() || !matchesClipAudioSnapshot(current, projectEpochRef.current, snapshot)) return h;
       return dispatchCommand(h, { type: "audioGain", clipIds: snapshot.clipIds, gain })?.history ?? h;
     });
   }, [areEditorShortcutsBlocked]);
+
+  const titleRequestRef=useRef<AbortController|null>(null);
+  useEffect(()=>()=>{titleRequestRef.current?.abort();},[projectEpoch]);
+  const preflightTitle=useCallback(async(text:string,current:EditorProject)=>{
+    titleRequestRef.current?.abort();const controller=new AbortController();titleRequestRef.current=controller;
+    const response=await requestTitleRaster(titleDescriptor(text),current.compositionWidth,current.compositionHeight,controller.signal);
+    if(!response.ok){const json=await response.json();throw new Error(json.error??"タイトル生成に失敗しました。");}
+    await response.body?.cancel();
+    return controller;
+  },[]);
+  const addTitleClip=useCallback(async()=>{
+    if(areEditorShortcutsBlocked())return;
+    const source=latestHistoryRef.current,epoch=projectEpochRef.current,result=dispatchCommand(source,{type:"addTitle",id:newId(),text:"タイトル"});
+    if(!result){setError("タイトルを追加できません。前面トラック・上限20トラック/100クリップ・再生位置を確認してください。");return;}
+    try{const request=await preflightTitle("タイトル",getCurrentProject(source));
+      if(request.signal.aborted)return;
+      setError(null);setHistory(h=>h===source&&epoch===projectEpochRef.current&&!areEditorShortcutsBlocked()&&!request.signal.aborted?result.history:h);
+    }catch(e){if(epoch===projectEpochRef.current&&latestHistoryRef.current===source)setError(e instanceof Error?e.message:String(e));}
+  },[areEditorShortcutsBlocked,preflightTitle]);
+  const applyTitleText=useCallback(async(snapshot:TitleEditSnapshot,raw:string)=>{
+    if(areEditorShortcutsBlocked())return;
+    let text:string;try{text=validateTitleText(raw);}catch(e){setError(e instanceof Error?e.message:String(e));return;}
+    const current=latestProjectRef.current;if(!matchesTitleEditSnapshot(current,projectEpochRef.current,snapshot))return;
+    const old=current.clips.find(c=>c.id===snapshot.id);if(old?.kind==="title"&&old.text===text)return;
+    try{const request=await preflightTitle(text,current);if(request.signal.aborted)return;
+      setHistory(h=>{const latest=getCurrentProject(h);if(request.signal.aborted||areEditorShortcutsBlocked()||!matchesTitleEditSnapshot(latest,projectEpochRef.current,snapshot))return h;return dispatchCommand(h,{type:"titleText",clipId:snapshot.id,text})?.history??h;});
+    }catch(e){if(matchesTitleEditSnapshot(latestProjectRef.current,projectEpochRef.current,snapshot))setError(e instanceof Error?e.message:String(e));}
+  },[areEditorShortcutsBlocked,preflightTitle]);
 
   const resizeClipDuration = useCallback(
     (clipId: string, newDurationSec: number) => {
@@ -513,13 +546,14 @@ export function useEditorStore() {
     const snapshot = latestProjectRef.current;
     const snapshotHistory = latestHistoryRef.current;
     const ids = [...snapshot.selectedClipIds];
+    if (snapshot.clips.some(c => ids.includes(c.id) && !isMediaClip(c))) return;
     if (!ids.length || !snapshot.clips.some(c => ids.includes(c.id) && (c.layoutMode ?? "stretch") !== layoutMode)) return;
     const epoch = projectEpochRef.current;
     setError(null);
     try {
       if (layoutMode === "contain") {
         setLayoutChecking(true);
-        const assetIds = new Set(snapshot.clips.filter(c => ids.includes(c.id)).flatMap(c => c.parts.map(p => p.assetId)));
+        const assetIds = new Set(snapshot.clips.filter(isMediaClip).filter(c => ids.includes(c.id)).flatMap(c => c.parts.map(p => p.assetId)));
         await validateBrowserMediaLayouts(snapshot.assets.filter(a => assetIds.has(a.id)));
       }
       setHistory(h => {
@@ -540,24 +574,47 @@ export function useEditorStore() {
       const next: EditorProject = {
         ...cur,
         clips: cur.clips.map((c) =>
-          ids.has(c.id) ? { ...c, transform: { ...fit } } : c,
+          ids.has(c.id) ? { ...c, transform: c.kind==="title"?{x:.5,y:.5,scale:1}:{ ...fit } } : c,
         ),
       };
       return { undoStack: [...h.undoStack, next], redoStack: [] };
     });
   }, []);
 
-  const setCompositionSize = useCallback((width: number, height: number) => {
+  const setCompositionSize = useCallback(async(width: number, height: number) => {
+    const source=latestHistoryRef.current,current=getCurrentProject(source),epoch=projectEpochRef.current;
+    if(current.clips.some(c=>c.kind==="title")){
+      if(areEditorShortcutsBlocked()||(current.compositionWidth===width&&current.compositionHeight===height))return;
+      try{
+        let request:AbortController|undefined;
+        const texts=[...new Set(current.clips.filter(c=>c.kind==="title").map(c=>c.text))];
+        for(const text of texts){
+          try{request=await preflightTitle(text,{...current,compositionWidth:width,compositionHeight:height});}
+          catch(e){if(e instanceof Error&&e.name==="AbortError")return;throw new Error(`タイトル「${text.split("\n")[0].slice(0,30)}」: ${e instanceof Error?e.message:String(e)}`);}
+          if(request.signal.aborted||latestHistoryRef.current!==source||projectEpochRef.current!==epoch||areEditorShortcutsBlocked())return;
+        }
+        setError(null);setHistory(h=>h===source&&projectEpochRef.current===epoch&&!areEditorShortcutsBlocked()&&!request?.signal.aborted?{undoStack:[...h.undoStack,{...current,compositionWidth:width,compositionHeight:height}],redoStack:[]}:h);
+      }catch(e){if(projectEpochRef.current===epoch&&latestHistoryRef.current===source)setError(e instanceof Error?e.message:String(e));}
+      return;
+    }
     setHistory((h) => {
       const cur = getCurrentProject(h);
       if (cur.compositionWidth === width && cur.compositionHeight === height) return h;
       const next: EditorProject = { ...cur, compositionWidth: width, compositionHeight: height };
       return { undoStack: [...h.undoStack, next], redoStack: [] };
     });
-  }, []);
+  }, [areEditorShortcutsBlocked,preflightTitle]);
 
   const matchCompositionToSelectedClip = useCallback(() => {
     setError(null);
+    const source=latestProjectRef.current;
+    if(source.clips.some(c=>c.kind==="title")){
+      const clip=source.clips.find(c=>c.id===source.selectedClipIds[0]);
+      if(!clip||!isMediaClip(clip)){setError("解像度を合わせる素材クリップを選択してください。");return;}
+      const asset=findAsset(source.assets,clip.parts[0]?.assetId??"");
+      if(!asset?.width||!asset.height){setError("選択クリップの素材解像度が不明です。");return;}
+      const size=compositionSizeFromAsset(asset.width,asset.height);void setCompositionSize(size.width,size.height);return;
+    }
     setHistory((h) => {
       const cur = getCurrentProject(h);
       const selectedId = cur.selectedClipIds[0];
@@ -567,7 +624,7 @@ export function useEditorStore() {
       }
       const clip = cur.clips.find((c) => c.id === selectedId);
       if (!clip) return h;
-      const asset = findAsset(cur.assets, clip.parts[0]?.assetId ?? "");
+      const asset = findAsset(cur.assets, clip.parts?.[0]?.assetId ?? "");
       if (!asset?.width || !asset?.height) {
         setError("選択クリップの素材解像度が不明です。");
         return h;
@@ -586,7 +643,7 @@ export function useEditorStore() {
       };
       return { undoStack: [...h.undoStack, next], redoStack: [] };
     });
-  }, []);
+  }, [setCompositionSize]);
 
   const exportSelectedClips = useCallback(async () => {
     setError(null);
@@ -597,6 +654,7 @@ export function useEditorStore() {
       return;
     }
 
+    if (cur.clips.some(c => clipIds.includes(c.id) && !isMediaClip(c))) { setError("タイトルを含む選択では素材DLできません。全体書き出しを使用してください。"); return; }
     setBusy(
       clipIds.length > 1
         ? `選択クリップを書き出し中… (0/${clipIds.length})`
@@ -661,13 +719,14 @@ export function useEditorStore() {
     setError(null);
     const snapshotHistory = latestHistoryRef.current;
     const cur = getCurrentProject(snapshotHistory);
+    if (cur.clips.some(c => cur.selectedClipIds.includes(c.id) && !isMediaClip(c))) { setError("タイトルは速度復元できません。"); return; }
     const clipId = cur.selectedClipIds[0];
     if (!clipId) {
       setError("速度復元する動画クリップを選択してください。");
       return;
     }
     const clip = cur.clips.find((c) => c.id === clipId);
-    const asset = cur.assets.find((a) => a.id === clip?.parts[0]?.assetId);
+    const asset = cur.assets.find((a) => a.id === clip?.parts?.[0]?.assetId);
     if (!clip || !asset || asset.kind !== "video") {
       setError("動画クリップを選択してください。");
       return;
@@ -927,6 +986,7 @@ export function useEditorStore() {
     moveSelectedClip,
     moveSelectedClips,
     setSelectedAudioGain,
+    addTitleClip,applyTitleText,
     resizeClipDuration,
     updateClipTransform,
     fitSelectedClipsToCanvas,

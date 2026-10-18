@@ -22,7 +22,7 @@ it.each([2, 3, 200])("resolved no-op resize (%s sec) preserves the entire pendin
 });
 it("preserves a custom composition length and joined parts when the tail is already exhausted",()=>{
  const p=fixture();p.compositionDurationSec=30;p.clips[0]!.durationSec=3;
- p.clips[0]!.parts=[{assetId:"video",sourceInSec:0,sourceOutSec:1},{assetId:"video",sourceInSec:0,sourceOutSec:2}];
+ p.clips[0]!.parts =[{assetId:"video",sourceInSec:0,sourceOutSec:1},{assetId:"video",sourceInSec:0,sourceOutSec:2}];
  const before=structuredClone(p);
  expect(resizeClip(p,p.clips[0]!.id,10,p.assets)).toBeNull();expect(p).toEqual(before);
 });
@@ -31,7 +31,7 @@ it("actual trim and extension remain one edit, invalidate stale Redo and roundtr
  const history=undo(dispatchCommand(createCommandHistory(p),{type:"duplicate",clipIds:p.selectedClipIds})!.history)!;
  const trimmed=dispatchCommand(history,{type:"resize",clipId:p.clips[0]!.id,newDurationSec:1})!.history;
  expect(trimmed.undoStack).toHaveLength(history.undoStack.length+1);expect(trimmed.redoStack).toEqual([]);
- expect(getCurrentProject(trimmed).clips[0]!.parts[0]!.sourceOutSec).toBe(1);
+ expect(getCurrentProject(trimmed).clips[0]!.parts![0]!.sourceOutSec).toBe(1);
  expect(getCurrentProject(undo(trimmed)!).clips).toEqual(p.clips);
  expect(getCurrentProject(redo(undo(trimmed)!)!).clips).toEqual(getCurrentProject(trimmed).clips);
  const extended=dispatchCommand(trimmed,{type:"resize",clipId:p.clips[0]!.id,newDurationSec:3})!.history;

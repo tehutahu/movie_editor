@@ -16,7 +16,8 @@ function AudioDraft({ editor, snapshot, blocked }: { editor: EditorStore; snapsh
   const gains = new Set(targets.map(clipAudioGain)), mixed = gains.size > 1;
   const display = mixed ? "" : String((gains.values().next().value ?? 1) * 100);
   const valid = draft !== null && /^\d{1,3}$/.test(draft) && Number(draft) <= 100;
-  const disabled = blocked || targets.length === 0;
+  const titles=editor.project.clips.filter(c=>snapshot.selection.includes(c.id)&&c.kind==="title").length;
+  const disabled = blocked || targets.length === 0 || titles>0;
   const apply = (gain?: number) => {
     if (editor.areEditorShortcutsBlocked() || disabled || (gain === undefined && !valid)) return;
     editor.setSelectedAudioGain(snapshot, gain ?? Number(draft) / 100);
@@ -31,7 +32,7 @@ function AudioDraft({ editor, snapshot, blocked }: { editor: EditorStore; snapsh
     <button type="button" onClick={() => apply()} disabled={disabled || !valid}>音量を適用</button>
     <button type="button" onClick={() => apply(0)} disabled={disabled}>消音（0%）</button>
     <span id={hintId} className="muted">{draft !== null && !valid ? "0〜100の整数を入力してください。" : "0%=消音"}</span>
-    <span className="muted" data-clip-audio-status>{blocked ? editor.restoreHelpBlocked ? "ヘルプを閉じてから操作してください。" : "処理が終わってから操作してください。" : `対象 ${targets.length}件 / 純画像 ${snapshot.selection.length - targets.length}件を除外${mixed ? " / 混在" : ""}`}</span>
+    <span className="muted" data-clip-audio-status>{blocked ? editor.restoreHelpBlocked ? "ヘルプを閉じてから操作してください。" : "処理が終わってから操作してください。" : titles?"タイトルを含む選択では音量を変更できません。":`対象 ${targets.length}件 / 純画像 ${snapshot.selection.length - targets.length}件を除外${mixed ? " / 混在" : ""}`}</span>
     <span className="muted">音量はプレビュー・全体出力に適用。素材DLは元音声。</span>
   </div>;
 }

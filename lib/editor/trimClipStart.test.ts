@@ -25,23 +25,23 @@ describe("trim clip prefix at playhead", () => {
     expect(p).toEqual(before);
     // Hand oracle: timeline 4.5/5/7.9 maps to source 9.5/10/12.9 before and after.
     for (const [t, source] of [[4.5, 9.5], [5, 10], [7.9, 12.9]])
-      expect(n.clips[0].parts[0].sourceInSec + t - n.clips[0].timelineStartSec).toBeCloseTo(source, 12);
+      expect(n.clips[0].parts![0].sourceInSec + t - n.clips[0].timelineStartSec).toBeCloseTo(source, 12);
   });
   it("allows a .01 prefix and keeps a positive microscopic part without EPS snapping", () => {
     const p = fixture(), id = p.clips[0].id;
-    expect(trimClipStart(p, id, 2.01)!.clips[0].parts[0].sourceInSec).toBeCloseTo(3.01, 14);
+    expect(trimClipStart(p, id, 2.01)!.clips[0].parts![0].sourceInSec).toBeCloseTo(3.01, 14);
     const n = trimClipStart(p, id, 4 - 1e-12)!;
-    expect(n.clips[0].parts).toHaveLength(2);
-    expect(n.clips[0].parts[0].sourceOutSec - n.clips[0].parts[0].sourceInSec).toBeGreaterThan(0);
-    expect(trimClipStart(p, id, 4)!.clips[0].parts).toEqual([{ assetId, sourceInSec: 9, sourceOutSec: 13 }]);
-    expect(trimClipStart(p, id, 4 + 1e-12)!.clips[0].parts[0].sourceInSec).toBeGreaterThan(9);
+    expect(n.clips[0].parts!).toHaveLength(2);
+    expect(n.clips[0].parts![0].sourceOutSec - n.clips[0].parts![0].sourceInSec).toBeGreaterThan(0);
+    expect(trimClipStart(p, id, 4)!.clips[0].parts!).toEqual([{ assetId, sourceInSec: 9, sourceOutSec: 13 }]);
+    expect(trimClipStart(p, id, 4 + 1e-12)!.clips[0].parts![0].sourceInSec).toBeGreaterThan(9);
   });
   it.each([0, 5e-7, -5e-7, 9.9999999e-7, -9.9999999e-7])("retains legal declared duration drift %s with fixed start/end and valid save", drift => {
     const p = fixture(), c = p.clips[0]; c.durationSec += drift;
     const n = trimClipStart(p, c.id, 4)!;
     expect(n.clips[0].timelineStartSec).toBe(4);
     expect(n.clips[0].durationSec).toBe(c.timelineStartSec + c.durationSec - 4);
-    expect(n.clips[0].parts).toEqual([{ assetId, sourceInSec: 9, sourceOutSec: 13 }]);
+    expect(n.clips[0].parts!).toEqual([{ assetId, sourceInSec: 9, sourceOutSec: 13 }]);
     expect(documentToProject(parseProjectDocument(projectDocumentDraft(n))).clips).toEqual(n.clips);
   });
   it.each([0, 2, 100, 86390])("canonicalizes only one ULP at MIN boundary near %s", start => {
@@ -64,16 +64,16 @@ describe("trim clip prefix at playhead", () => {
     c.parts = [{ assetId, sourceInSec: 0, sourceOutSec: .01 },
       { assetId, sourceInSec: source, sourceOutSec: source + step },
       { assetId, sourceInSec: 1, sourceOutSec: 2 }];
-    c.durationSec = c.parts.reduce((sum, part) => sum + part.sourceOutSec - part.sourceInSec, 0);
+    c.durationSec = c.parts!.reduce((sum, part) => sum + part.sourceOutSec - part.sourceInSec, 0);
     // At near-zero the timeline cannot represent a sub-tail increment: exact
     // boundary must preserve that whole following microscopic positive part.
     const request = .01 + step * .75;
     const n = trimClipStart(p, c.id, request)!.clips[0];
-    expect(n.parts).toHaveLength(2);
-    expect(n.parts[0].sourceInSec).toBe(source);
-    expect(n.parts[0].sourceOutSec).toBe(source + step);
-    expect(n.parts[0].sourceOutSec - n.parts[0].sourceInSec).toBeGreaterThan(0);
-    expect(Math.abs(n.parts.reduce((sum, part) => sum + part.sourceOutSec - part.sourceInSec, 0) - n.durationSec)).toBeLessThanOrEqual(1e-6);
+    expect(n.parts!).toHaveLength(2);
+    expect(n.parts![0].sourceInSec).toBe(source);
+    expect(n.parts![0].sourceOutSec).toBe(source + step);
+    expect(n.parts![0].sourceOutSec - n.parts![0].sourceInSec).toBeGreaterThan(0);
+    expect(Math.abs(n.parts!.reduce((sum, part) => sum + part.sourceOutSec - part.sourceInSec, 0) - n.durationSec)).toBeLessThanOrEqual(1e-6);
   });
   it("uses equivalent retained duration to avoid a legal drift-boundary cancellation", () => {
     const p = fixture(), c = p.clips[0]; c.durationSec = 1.000001;
@@ -82,7 +82,7 @@ describe("trim clip prefix at playhead", () => {
     expect(n.timelineStartSec).toBe(2.01);
     expect(n.durationSec).toBe(c.durationSec - (2.01 - 2));
     expect(n.timelineStartSec + n.durationSec).toBe(c.timelineStartSec + c.durationSec);
-    expect(n.parts[0].sourceInSec).toBe(2.01 - 2);
+    expect(n.parts![0].sourceInSec).toBe(2.01 - 2);
     expect(() => parseProjectDocument(projectDocumentDraft({ ...p, clips: [n] }))).not.toThrow();
   });
   it.each([
@@ -100,10 +100,10 @@ describe("trim clip prefix at playhead", () => {
     let prefix = at - start, first = 0;
     while (prefix >= parts[first][1] - parts[first][0]) { prefix -= parts[first][1] - parts[first][0]; first++; }
     const normalIn = parts[first][0] + prefix;
-    expect(n.parts[0].sourceInSec).toBeGreaterThanOrEqual(parts[first][0]);
-    expect(n.parts[0].sourceInSec).toBeLessThan(parts[first][1]);
-    expect(n.parts[0].sourceOutSec).toBe(parts[first][1]);
-    expect(Math.abs(n.parts[0].sourceInSec - normalIn)).toBeLessThanOrEqual(bound);
+    expect(n.parts![0].sourceInSec).toBeGreaterThanOrEqual(parts[first][0]);
+    expect(n.parts![0].sourceInSec).toBeLessThan(parts[first][1]);
+    expect(n.parts![0].sourceOutSec).toBe(parts[first][1]);
+    expect(Math.abs(n.parts![0].sourceInSec - normalIn)).toBeLessThanOrEqual(bound);
     expect(() => parseProjectDocument(projectDocumentDraft({ ...p, clips: [n] }))).not.toThrow();
   });
   it("retains exact boundaries and existing tolerance across many parts and signed drift", () => {
@@ -111,10 +111,10 @@ describe("trim clip prefix at playhead", () => {
       const p = fixture(), c = p.clips[0]; p.assets[0].sourceDurationSec = 86400; p.compositionDurationSec = 86400;
       c.timelineStartSec = start;
       c.parts = Array.from({ length: 50 }, (_, i) => ({ assetId, sourceInSec: source + i, sourceOutSec: source + i + .2 }));
-      const sum = c.parts.reduce((s, part) => s + part.sourceOutSec - part.sourceInSec, 0);
+      const sum = c.parts!.reduce((s, part) => s + part.sourceOutSec - part.sourceInSec, 0);
       c.durationSec = sum + drift;
       if (Math.abs(c.durationSec - sum) > 1e-6) continue; // The input validator rejects this rounded side of the boundary.
-      for (const prefix of [.01, c.parts[0].sourceOutSec - source, 3.17, c.durationSec - .05]) {
+      for (const prefix of [.01, c.parts![0].sourceOutSec - source, 3.17, c.durationSec - .05]) {
         const at = start + prefix;
         const n = trimClipStart(p, c.id, at);
         expect(n, JSON.stringify({ start, source, drift, at })).not.toBeNull();
@@ -166,7 +166,7 @@ describe("trim clip prefix at playhead", () => {
     for (const patch of [{ sourceJobId: assetId }, { storageAssetId: assetId }, { streamUrl: "changed" }, { sourceDurationSec: 99 }])
       expect(matchesTrimStartSnapshot({ ...p, assets: [{ ...p.assets[0], ...patch }] }, 3, s)).toBe(false);
     for (const patch of [{ timelineStartSec: 3 }, { durationSec: 3 }, { trackId: "other" }, { parts: [] }])
-      expect(matchesTrimStartSnapshot({ ...p, clips: [{ ...p.clips[0], ...patch }] }, 3, s)).toBe(false);
+      expect(matchesTrimStartSnapshot({ ...p, clips: [{ ...(p.clips[0] as import("./types").MediaClip), ...patch }] }, 3, s)).toBe(false);
   });
   it.each(["stretch", "contain"] as const)("preserves %s, image and restored current-source references", mode => {
     const p = fixture(); p.assets[0] = { ...p.assets[0], kind: "image", ext: "png", sourceJobId: assetId };
@@ -174,6 +174,6 @@ describe("trim clip prefix at playhead", () => {
     const n = trimClipStart(p, p.clips[0].id, 3)!;
     expect(n.assets).toBe(p.assets); expect(n.clips[0].layoutMode).toBe(mode);
     expect(n.clips[0].transform).toBe(p.clips[0].transform);
-    expect(n.clips[0].parts[0]).toEqual({ assetId, sourceInSec: 4, sourceOutSec: 5 });
+    expect(n.clips[0].parts![0]).toEqual({ assetId, sourceInSec: 4, sourceOutSec: 5 });
   });
 });

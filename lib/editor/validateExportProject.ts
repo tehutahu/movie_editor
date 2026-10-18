@@ -1,3 +1,4 @@
+import { validateTitleDescriptor } from "./title";
 import { validAudioGain } from "./clipAudio";
 import {
   DEFAULT_COMPOSITION_HEIGHT,
@@ -173,6 +174,14 @@ export function parseClip(
     throw new Error(`clips[${index}] が compositionDurationSec を超えています。`);
   }
 
+  if (o.kind === "title") {
+    const allowed = new Set(["kind", "id", "trackId", "timelineStartSec", "durationSec", "transform", "text", "fontId", "fontRevision", "styleRevision"]);
+    if (Object.keys(o).some(k => !allowed.has(k))) throw new Error("タイトルに素材・cache・未知fieldは指定できません。");
+    return { kind: "title", id: assertStorageId(`clips[${index}].id`, String(o.id ?? "")), trackId, timelineStartSec, durationSec,
+      transform: parseTransform(o.transform, `clips[${index}].transform`), ...validateTitleDescriptor(o) };
+  }
+  if (o.kind !== undefined && o.kind !== "media") throw new Error("未対応のclip kindです。");
+  if (["text", "fontId", "fontRevision", "styleRevision"].some(k => Object.hasOwn(o, k))) throw new Error("素材にタイトルfieldは指定できません。");
   if (!Array.isArray(o.parts) || o.parts.length === 0) {
     throw new Error(`clips[${index}].parts は1件以上必要です。`);
   }
@@ -228,9 +237,7 @@ export function parseCompositionExportPayload(raw: unknown): ParsedCompositionEx
   if (!Array.isArray(body.assets)) {
     throw new Error("assets は配列である必要があります。");
   }
-  if (body.assets.length === 0) {
-    throw new Error("assets が空です。");
-  }
+
   if (body.assets.length > MAX_COMPOSITION_EXPORT_ASSETS) {
     throw new Error("assets が多すぎます。");
   }
@@ -263,6 +270,7 @@ export function parseCompositionExportPayload(raw: unknown): ParsedCompositionEx
     parseClip(clip, i, trackIds, assetIds, compositionDurationSec),
   );
 
+  if (!assets.length && clips.some(c => c.kind !== "title")) throw new Error("assets が空です。");
   const exportBaseName = parseExportBaseName(body.exportBaseName);
 
   return {

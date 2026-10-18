@@ -40,6 +40,11 @@ main:has(.editor-shell-v2) {
   box-sizing: border-box;
 }
 
+/* Bound the side-by-side editor; narrow stacked layouts retain document flow. */
+@media (min-width: 981px) {
+  main:has(.editor-shell-v2) { height: 100dvh; }
+}
+
 .panel {
   background: #171a21;
   border: 1px solid #273043;
@@ -984,6 +989,7 @@ button.primary {
 }
 
 .editor-project-bar {
+  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -1126,3 +1132,12 @@ button.primary {
 .clip-audio-control { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 4px 8px; font-size: .8rem; }
 .clip-audio-control input { width: 76px; }
 .clip-audio-control button { padding: 4px 8px; font-size: .8rem; }
+
+/* Editable titles use the same raster in Canvas and full export. */
+.title-control { border-top: 1px solid #3c414b; padding-top: 10px; margin-bottom: 10px; }
+.title-control label { display: block; font-size: .85rem; }
+.title-control textarea { display: block; width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px; }
+.title-control p { font-size: .75rem; margin: 5px 0; }
+.title-control button { margin: 4px 0; }
+.title-preview-status { position: absolute; z-index: 2; top: 0; left: 6px; right: 6px; padding: 4px; background: #1b2029e8; font-size: .8rem; }
+.timeline-clip--title { background-color: #50416c; }

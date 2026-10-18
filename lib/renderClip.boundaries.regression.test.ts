@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, copyFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Asset, Clip, EditorProject } from "./editor/types";
+import type { Asset, MediaClip as Clip, EditorProject } from "./editor/types";
 import { createEmptyProject } from "./editor/project";
 import { exportCompositionToFile } from "./exportComposition";
 import { renderClipToFile } from "./renderClip";
@@ -48,7 +48,7 @@ async function exportCase(name: string, c: Clip) {
 function legacyCase(c: Clip, result: Awaited<ReturnType<typeof exportCase>>) {
   const prepared = path.join(result.dir, "part_0.mp4"), oldPart = path.join(result.dir, "legacy-part.mp4"), oldOutput = path.join(result.dir, "legacy.mp4");
   const concatCall = result.calls.find(args => args.includes(prepared))!;
-  const filters = c.parts.flatMap((p, i) => [`[${i}:v]trim=duration=${p.sourceOutSec - p.sourceInSec},setpts=PTS-STARTPTS[v${i}]`, `[${i}:a]atrim=duration=${p.sourceOutSec - p.sourceInSec},asetpts=PTS-STARTPTS[a${i}]`]);
+  const filters = c.parts!.flatMap((p, i) => [`[${i}:v]trim=duration=${p.sourceOutSec - p.sourceInSec},setpts=PTS-STARTPTS[v${i}]`, `[${i}:a]atrim=duration=${p.sourceOutSec - p.sourceInSec},asetpts=PTS-STARTPTS[a${i}]`]);
   filters.push("[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]");
   ff(["-i", path.join(result.dir, "part_0_source_0.mp4.keep"), "-i", path.join(result.dir, "part_0_source_1.mp4.keep"), "-filter_complex", filters.join(";"), "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-t", String(c.durationSec), "-movflags", "+faststart", oldPart]);
   expect(concatCall).toBeDefined();
@@ -172,7 +172,7 @@ it.skipIf(!real)("real ffmpeg: 50 parts preserve the independently concatenated 
 it.skipIf(!real)("real ffmpeg: all planned tail packets decode across modulo-three counts and signed duration drift", async () => {
   for (const [i, duration] of [1, 1.02, 1.06].entries()) {
     for (const drift of [-1e-6, 0, 1e-6]) {
-      const c = clip(1.75, 1, 1.25); c.parts[1].sourceOutSec = .5 + duration;
+      const c = clip(1.75, 1, 1.25); c.parts![1].sourceOutSec = .5 + duration;
       c.durationSec = .25 + duration + drift;
       const result = await exportCase(`tail-${i}-${drift}`, c);
       const prepared = path.join(result.dir, "part_0.mp4.keep"), decoded = raw(prepared);

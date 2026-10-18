@@ -37,7 +37,7 @@ export function clipFromAsset(params: {
   timelineStartSec: number;
   durationSec?: number;
   tracks?: readonly Track[];
-}): Clip {
+}): import("./types").MediaClip {
   const { asset, trackId, timelineStartSec } = params;
   const durationSec =
     params.durationSec ??

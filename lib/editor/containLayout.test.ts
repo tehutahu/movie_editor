@@ -59,5 +59,5 @@ describe("opt-in contain geometry, persistence and commands", () => {
     expect(()=>parseProjectDocument({...projectDocumentDraft(project()),version:2,project:{...projectDocumentDraft(project()).project,clips:p.clips}})).toThrow();
     expect(()=>parseCompositionExportPayload(p)).toThrow();
   });
-  it.each([0,4,"1",null])("rejects unknown document version %j", version => expect(()=>parseProjectDocument({...projectDocumentDraft(project()),version})).toThrow());
+  it.each([0,5,"1",null])("rejects unknown document version %j", version => expect(()=>parseProjectDocument({...projectDocumentDraft(project()),version})).toThrow());
 });

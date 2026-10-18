@@ -9,7 +9,8 @@ export type InputAudio =
 /** Match the existing restore target: first selected clip, first part's asset. */
 export function restoreInputTarget(project: EditorProject, epoch: number) {
   const clip = project.clips.find(c => c.id === project.selectedClipIds[0]);
-  const part = clip?.parts[0], asset = project.assets.find(a => a.id === part?.assetId);
+  if (project.clips.some(c => project.selectedClipIds.includes(c.id) && c.kind === "title")) return null;
+  const part = clip?.parts?.[0], asset = project.assets.find(a => a.id === part?.assetId);
   if (!clip || !part || asset?.kind !== "video") return null;
   const source = restoreSource(asset);
   return { source, name: asset.displayName, key: JSON.stringify({ epoch, clipId: clip.id, part, source }) };

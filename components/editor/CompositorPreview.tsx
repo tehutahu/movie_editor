@@ -1,5 +1,8 @@
 "use client";
 
+import { useTitleImages, titleImageKey } from "@/hooks/useTitleImages";
+import { activeVisualClips } from "@/lib/editor/compositor";
+import type { Clip } from "@/lib/editor/types";
 import { clipAudioGain } from "@/lib/editor/clipAudio";
 import type { EditorStore } from "@/hooks/useEditorStore";
 import {
@@ -118,7 +121,7 @@ type TransformDrag = {
 };
 
 function layerTransform(
-  layer: ActiveClipLayer,
+  layer: {clip:Clip},
   preview: { clipId: string; transform: ClipTransform } | null,
 ): ClipTransform {
   if (preview?.clipId === layer.clip.id) return preview.transform;
@@ -369,7 +372,10 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     [requestDraw],
   );
 
-  const layoutSources = JSON.stringify(project.assets.filter(a => project.clips.some(c => c.layoutMode === "contain" && c.parts.some(p => p.assetId === a.id))));
+  const titleImages=useTitleImages(project,editor.projectEpoch,requestDraw);
+  const titleImagesRef=useRef(titleImages);titleImagesRef.current=titleImages;
+
+  const layoutSources = JSON.stringify(project.assets.filter(a => project.clips.some(c => c.layoutMode === "contain" && c.parts?.some(p => p.assetId === a.id))));
   const [layouts, setLayouts] = useState<{ key: string; values: Map<string, MediaLayout>; error?: string }>({ key: "", values: new Map() });
   const layoutsRef = useRef(layouts);
   layoutsRef.current = layouts;
@@ -499,26 +505,32 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     const preview = transformPreviewRef.current;
 
     const drawableLayers = layers.filter((layer) => canDrawMedia(ensureMedia(layer)));
-    if (layers.length > 0 && drawableLayers.length === 0) {
+    if (!activeVisualClips(proj).some(c=>c.clip.kind==="title") && layers.length > 0 && drawableLayers.length === 0) {
       return;
     }
 
     ctx.fillStyle = COMPOSITION_BG_CSS;
     ctx.fillRect(0, 0, w, h);
 
-    for (const layer of layers) {
-      const media = ensureMedia(layer);
+    const visualLayers=activeVisualClips(proj);
+    for (const layer of visualLayers) {
+      const mediaLayer=layers.find(l=>l.clip.id===layer.clip.id);
+      const title=layer.clip.kind==="title"?layer.clip:null;
+      const media=mediaLayer?ensureMedia(mediaLayer):null;
       const transform = layerTransform(layer, preview);
       const { x, y, scale } = transform;
-      const drawW = w * BASE_DRAW_WIDTH_RATIO * scale;
-      const drawH = h * BASE_DRAW_HEIGHT_RATIO * scale;
+      const drawW = w * (title?1:BASE_DRAW_WIDTH_RATIO) * scale;
+      const drawH = h * (title?1:BASE_DRAW_HEIGHT_RATIO) * scale;
       const cx = x * w;
       const cy = y * h;
 
       ctx.save();
-      if (canDrawMedia(media)) {
+      if(title){
+        const bitmap=titleImagesRef.current.images.current.get(titleImageKey(title,proj.compositionWidth,proj.compositionHeight));
+        if(bitmap){const rect=transformToPixelRect(transform,proj.compositionWidth,proj.compositionHeight,1);ctx.drawImage(bitmap,rect.x*w/proj.compositionWidth,rect.y*h/proj.compositionHeight,rect.w*w/proj.compositionWidth,rect.h*h/proj.compositionHeight);}
+      } else if (media&&mediaLayer&&canDrawMedia(media)) {
         if (layer.clip.layoutMode === "contain") {
-          const intrinsic = layoutsRef.current.values.get(mediaLayoutKey(layer.asset));
+          const intrinsic = layoutsRef.current.values.get(mediaLayoutKey(mediaLayer.asset));
           const actualW = media instanceof HTMLVideoElement ? media.videoWidth : media.naturalWidth;
           const actualH = media instanceof HTMLVideoElement ? media.videoHeight : media.naturalHeight;
           if (intrinsic && actualW === intrinsic.width && actualH === intrinsic.height) {
@@ -663,14 +675,14 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   const resolveTransformAtPointer = useCallback(
     (nx: number, ny: number, w: number, h: number) => {
       const proj = projectRef.current;
-      const layers = resolveActiveClipsAtPlayhead(proj, proj.playheadSec);
+      const layers = activeVisualClips(proj);
       const preview = transformPreviewRef.current;
 
       for (let i = layers.length - 1; i >= 0; i--) {
         const layer = layers[i]!;
         if (!proj.selectedClipIds.includes(layer.clip.id)) continue;
         const transform = layerTransform(layer, preview);
-        const handle = hitTestTransformHandle(transform, nx, ny, w, h, HANDLE_HIT_PX);
+        const handle = hitTestTransformHandle(transform, nx, ny, w, h, HANDLE_HIT_PX,layer.clip.kind==="title"?1:.5);
         if (handle) {
           return { clip: layer.clip, mode: `resize-${handle}` as TransformDragMode, transform };
         }
@@ -679,7 +691,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
       for (let i = layers.length - 1; i >= 0; i--) {
         const layer = layers[i]!;
         const transform = layerTransform(layer, preview);
-        if (clipContainsNormPoint(transform, nx, ny)) {
+        if (clipContainsNormPoint(transform, nx, ny,layer.clip.kind==="title"?1:.5)) {
           return { clip: layer.clip, mode: "move" as TransformDragMode, transform };
         }
       }
@@ -737,7 +749,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
         next = transformFromMove(drag.origTransform, dx / pos.w, dy / pos.h);
       } else {
         const handle = drag.mode.replace("resize-", "") as TransformHandle;
-        next = transformFromResize(drag.origTransform, handle, { x: pos.px, y: pos.py }, pos.w, pos.h);
+        next = transformFromResize(drag.origTransform, handle, { x: pos.px, y: pos.py }, pos.w, pos.h,projectRef.current.clips.find(c=>c.id===drag.clipId)?.kind==="title"?1:.5);
       }
 
       setTransformDrag({ ...drag, moved: true });
@@ -786,7 +798,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     const hit = resolveTransformAtPointer(pos.nx, pos.ny, pos.w, pos.h);
     if (!hit || hit.mode !== "move") return;
     selectClip(hit.clip.id, false);
-    updateClipTransform(hit.clip.id, fitClipTransformToCanvas());
+    updateClipTransform(hit.clip.id, hit.clip.kind==="title"?{x:.5,y:.5,scale:1}:fitClipTransformToCanvas());
   }
 
   function onWheel(e: React.WheelEvent) {
@@ -828,7 +840,8 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
         onPointerMove={onWrapPointerMove}
         onPointerLeave={onWrapPointerLeave}
       >
-        <canvas
+        {titleImages.status&&<p role="status" className="title-preview-status">{titleImages.status}{titleImages.status!=="タイトルを生成中…"&&<button type="button" onClick={titleImages.retry}>タイトル表示を再試行</button>}</p>}
+      <canvas
           ref={canvasRef}
           className="compositor-canvas"
           style={{ cursor: canvasCursor }}

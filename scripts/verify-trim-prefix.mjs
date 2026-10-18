@@ -5,6 +5,7 @@ import console from 'node:console';
 import process from 'node:process';
 import { verification } from './browser-test-utils.mjs';
 import { captureEvidenceScreenshot } from './browser-screenshot.mjs';
+import { visiblePointerPoint, assertPointerHit, dragToVisibleTarget } from './browser-pointer.mjs';
 const suite=verification('trim-prefix',3157),{evidence,baseURL,ff}=suite;
 let page;const checks=[],errors=[],forbidden=[],hitTests=[];
 function check(name,condition=true){assert(condition,name);checks.push(name);console.log('PASS',name);fs.writeFileSync(`${evidence}/results.json`,JSON.stringify({checks,errors,forbidden,hitTests},null,2));}
@@ -23,7 +24,7 @@ async function exportProject(project,name){
   }
   throw Error('trim export timeout');
 }
-async function seek(t){const b=await page.locator('.timeline-scroll').boundingBox();await page.mouse.click(b.x+48+80*t,b.y+8);}
+async function seek(t){const point=await visiblePointerPoint(page,page.locator('.timeline-scroll'),{x:48+80*t,y:8});await page.mouse.click(point.x,point.y);}
 (async()=>{
   ff(['-y','-f','lavfi','-i','testsrc2=s=320x240:r=30:d=6','-f','lavfi','-i','sine=frequency=440:duration=6','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',`${evidence}/source.mp4`]);
   ff(['-y','-f','lavfi','-i','color=red:s=320x320','-frames:v','1',`${evidence}/image.png`]);
@@ -33,19 +34,21 @@ async function seek(t){const b=await page.locator('.timeline-scroll').boundingBo
   const undo=page.getByTitle('Undo (Ctrl+Z)',{exact:true}),redo=page.getByTitle('Redo (Shift+Ctrl+Z)',{exact:true});
   await trim.focus();check('unselected control exposes a focus-visible disabled reason',await trim.getAttribute('aria-disabled')==='true'&&await page.locator('.trim-start-reason').isVisible());
   await page.locator('.asset-library input[type=file]').setInputFiles(`${evidence}/source.mp4`);await page.locator('.asset-card').waitFor();await page.waitForFunction(()=>!document.querySelector('.busy-banner'));
-  await page.locator('.asset-card').dragTo(page.locator('.timeline-track-row').first(),{targetPosition:{x:48,y:30}});await page.locator('.timeline-clip').waitFor();
+  await dragToVisibleTarget(page, page.locator('.asset-card'), page.locator('.timeline-track-row').first(),{targetPosition:{x:48,y:30}});await page.locator('.timeline-clip').waitFor();
   const template=await save();
   for(const contain of [false,true]){
     const doc=structuredClone(template);doc.version=contain?2:1;const c=doc.project.clips[0];c.timelineStartSec=2;c.durationSec=4;
     c.parts=[{assetId:c.parts[0].assetId,sourceInSec:1,sourceOutSec:2},{assetId:c.parts[0].assetId,sourceInSec:3,sourceOutSec:6}];
     c.transform={x:.4,y:.6,scale:.8};if(contain)c.layoutMode='contain';doc.project.compositionDurationSec=12;doc.project.compositionWidth=320;doc.project.compositionHeight=320;
     await load(doc,`input-${contain}`);await trim.focus();await page.locator('.timeline-clip').click({position:{x:30,y:10}});
+    await page.locator('.timeline-scroll').scrollIntoViewIfNeeded();
     const tip=await page.locator('.trim-start-reason').boundingBox(),ruler=await page.locator('.timeline-ruler').boundingBox(),scroll=await page.locator('.timeline-scroll').boundingBox();
     assert(tip&&ruler&&scroll);const left=Math.max(tip.x,ruler.x),right=Math.min(tip.x+tip.width,ruler.x+ruler.width),top=Math.max(tip.y,ruler.y),bottom=Math.min(tip.y+tip.height,ruler.y+ruler.height);
     assert(right>left&&bottom>top,'focused explanation must actually overlap the ruler');
     const x=(left+right)/2,y=(top+bottom)/2,scrollLeft=await page.locator('.timeline-scroll').evaluate(e=>e.scrollLeft),expectedSec=(x-scroll.x-48+scrollLeft)/80;
     assert(expectedSec>0&&x>=tip.x&&x<=tip.x+tip.width&&y>=tip.y&&y<=tip.y+tip.height);
     hitTests.push({mode:contain?'contain':'stretch',tip,ruler,scroll,click:{x,y},expectedSec});
+    await assertPointerHit(page,page.locator('.timeline-ruler'),{x,y});
     await page.mouse.click(x,y);
     await page.waitForFunction(expected=>Math.abs(parseFloat(document.querySelector('.timeline-ruler .timeline-playhead').style.left)-(48+expected*80))<.01,expectedSec);
     check(`${contain?'v2':'v1'} ruler click inside the focused explanation overlap changes the playhead after clip selection`);

@@ -1,8 +1,9 @@
+import { isMediaClip } from "./types";
 import type { Clip, EditorProject } from "./types";
 export const clipAudioGain = (clip: Clip): number => clip.audioGain ?? 1;
 export const validAudioGain = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 export function clipHasVideo(project: EditorProject, clip: Clip): boolean {
-  return clip.parts.some(p => project.assets.some(a => a.id === p.assetId && a.kind === "video"));
+  return isMediaClip(clip) && clip.parts.some(p => project.assets.some(a => a.id === p.assetId && a.kind === "video"));
 }
 /** Exact round-trip decimal, shared by both audio graphs (never time rounding). */
 export function formatAudioGain(gain: number): string {
@@ -22,7 +23,7 @@ export function setClipAudioGain(project: EditorProject, clipIds: readonly strin
   if (!validAudioGain(gain) || !ids.size || ids.size !== clipIds.length || targets.length !== ids.size || targets.some(c => !clipHasVideo(project, c))) return null;
   if (!targets.some(c => clipAudioGain(c) !== gain)) return null;
   return { ...project, clips: project.clips.map(c => {
-    if (!ids.has(c.id) || clipAudioGain(c) === gain) return c;
+    if (!isMediaClip(c) || !ids.has(c.id) || clipAudioGain(c) === gain) return c;
     const { audioGain: _old, ...rest } = c;
     return gain === 1 ? rest : { ...rest, audioGain: gain };
   }) };
@@ -38,7 +39,7 @@ export type ClipAudioSnapshot = { epoch: number; selection: string[]; clipIds: s
 export function clipAudioSnapshot(project: EditorProject, epoch: number): ClipAudioSnapshot {
   const selection = [...project.selectedClipIds], selected = selection.map(id => project.clips.find(c => c.id === id));
   const clipIds = selected.filter((c): c is Clip => Boolean(c && clipHasVideo(project, c))).map(c => c.id);
-  const assetIds = new Set(selected.flatMap(c => c?.parts.map(p => p.assetId) ?? []));
+  const assetIds = new Set(selected.flatMap(c => c && isMediaClip(c) ? c.parts.map(p => p.assetId) : []));
   return { epoch, selection, clipIds, identity: JSON.stringify({ selected, assets: project.assets.filter(a => assetIds.has(a.id)) }) };
 }
 export function matchesClipAudioSnapshot(project: EditorProject, epoch: number, snapshot: ClipAudioSnapshot): boolean {
