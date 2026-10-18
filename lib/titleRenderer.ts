@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile, copyFile, chmod, rename, rm, mkdtemp, stat 
 import { STORAGE_ROOT } from "./paths";
 import { createReadStream } from "node:fs";
 import { claimTitleCacheOwner } from "./titleCacheOwner";
-import { titleChild } from "./titleChild";
+import { titleChild, type TitleChildTrace } from "./titleChild";
 import { inspectTitlePng } from "./titlePng";
 import { fontCoverageRanges } from "./titleFontCmap";
 import { titleFontMetrics } from "./titleFontMetrics";
@@ -16,8 +16,9 @@ const MAX_CACHE = 128 * 1024 * 1024, MAX_ENTRY = 32 * 1024 * 1024;
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 async function fileDigest(file:string){const h=createHash("sha256");for await(const chunk of createReadStream(file))h.update(chunk);return h.digest("hex");}
 const xml = (text: string) => text.replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&apos;" })[c]!);
-export class TitleBusyError extends Error { readonly status = 429; }
-type Entry = { key: string; file: string; bytes: number; hash: string; refs: number; pending: number; accessed: number; invalid?: boolean };
+export class TitleBusyError extends Error { readonly status = 429; readonly code="TITLE_RASTER_BUSY"; }
+export function isTitleBusyError(value:unknown):boolean{return Boolean(value&&typeof value==="object"&&"code"in value&&value.code==="TITLE_RASTER_BUSY"&&"status"in value&&value.status===429);}
+type Entry = { key: string; file: string; metadataFile:string;metadataHash:string;bytes: number; hash: string; refs: number; pending: number; accessed: number; invalid?: boolean };
 export type TitleLease = { file: string; hash: string; key: string; release: () => void };
 type Task = { key: string; title: TitleClip; width: number; height: number; owners: Set<symbol>; controller: AbortController; promise: Promise<Entry>; resolve: (entry: Entry) => void; reject: (e: unknown) => void; timer: ReturnType<typeof setTimeout>; entry?: Entry; closed:Promise<void>; close:()=>void };
 export type TitleRendererIdentity = { binary: string; binaryHash: string; font: string; fontDir: string; env: NodeJS.ProcessEnv; root: string; id: string; fit:ReturnType<typeof titleFontMetrics> };
@@ -36,22 +37,24 @@ async function identity(): Promise<TitleRendererIdentity> {
   const vendorFontDir = path.resolve(process.cwd(), "vendor/fonts/noto-sans-cjk/fonts"), fontBytes = await readFile(path.join(vendorFontDir, "NotoSansCJK-Regular.ttc"));
   if (digest(fontBytes) !== TITLE_FONT_REVISION || JSON.stringify(fontCoverageRanges(fontBytes)) !== JSON.stringify(coverage.ranges)) throw new Error("固定タイトルfontの実体が一致しません。");
   const cacheRoot = path.join(STORAGE_ROOT, "title-cache"); await mkdir(cacheRoot, { recursive: true });
-  const owner = await claimTitleCacheOwner(cacheRoot), binary = path.join(owner, "ffmpeg"), fontDir=path.join(owner,"fonts"),font=path.join(fontDir,"NotoSansCJK-Regular.ttc");
+  const ownerLease = await claimTitleCacheOwner(cacheRoot), owner=ownerLease.directory,binary = path.join(owner, "ffmpeg"), fontDir=path.join(owner,"fonts"),font=path.join(fontDir,"NotoSansCJK-Regular.ttc");
   try {
     await mkdir(fontDir);await writeFile(font,fontBytes,{mode:0o400});
     await writeFile(binary, binaryBytes, { mode: 0o500 }); if (digest(await readFile(binary)) !== binaryHash) throw new Error("renderer snapshotが一致しません。");
     const config = path.join(owner, "fonts.conf"), fontCache = path.join(owner, "font-cache"); await mkdir(fontCache);
     await writeFile(config, `<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd"><fontconfig><dir>${xml(fontDir)}</dir><cachedir>${xml(fontCache)}</cachedir></fontconfig>`);
     const env = { ...process.env, FONTCONFIG_FILE: config, FONTCONFIG_PATH: owner };
-    const version = await titleChild(binary, ["-version"], { env });
-    const filters = await titleChild(binary, ["-hide_banner", "-filters"], { env }); if (!/\bass\s+V->V/.test(filters)) throw new Error("固定rendererにlibassがありません。");
+    const commands:TitleChildTrace[]=[],onComplete=(trace:TitleChildTrace)=>{commands.push(trace);};
+    const version = await titleChild(binary, ["-version"], { env,onComplete });
+    const filters = await titleChild(binary, ["-hide_banner", "-filters"], { env,onComplete }); if (!/\bass\s+V->V/.test(filters)) throw new Error("固定rendererにlibassがありません。");
     // Capture shaper/provider identity using an actual render before keys are published.
     const probeAss = path.join(owner, "probe.ass"), probePng = path.join(owner, "probe.png"); await writeFile(probeAss, titleAss("日本語", 320, 320));
-    const log = await titleChild(binary, rasterArgs(probeAss, probePng, fontDir, 320, 320), { env }); assertFontLog(log); inspectTitlePng(await readFile(probePng), 320, 320);
+    const log = await titleChild(binary, rasterArgs(probeAss, probePng, fontDir, 320, 320), { env,onComplete }); assertFontLog(log); inspectTitlePng(await readFile(probePng), 320, 320);
     const manifest = { binaryHash, version, shaper: log.split("\n").filter(l=>/libass |Shaper:|Using font provider/.test(l)).map(l=>l.replace(/^\[[^\]]+\]\s*/, "")), fontHash: TITLE_FONT_REVISION, face: "NotoSansCJKjp-Regular/index0", pipeline: "title-rgba-ass-fit-v2", fontconfig: "self-contained-no-reset-v1" };
     const id = digest(JSON.stringify(manifest)); await writeFile(path.join(owner, "manifest.json"), JSON.stringify(manifest, null, 2)); await rm(probeAss); await rm(probePng);
+    await writeFile(path.join(owner,"startup-trace.json"),JSON.stringify({commands,probeLog:log},null,2));
     return { binary, binaryHash, font, fontDir, env, root: owner, id,fit:titleFontMetrics(fontBytes) };
-  } catch (e) { await rm(owner, { recursive: true, force: true }); throw e; }
+  } catch (e) { await ownerLease.release(); throw e; }
 }
 function assertFontLog(log: string) {
   const selects = log.split("\n").filter(l=>l.includes("fontselect:"));
@@ -67,16 +70,17 @@ function rasterArgs(ass: string, png: string, fontDir: string, width: number, he
   return ["-hide_banner","-y","-f","lavfi","-i",`color=c=black@0:s=${width}x${height}:r=1,format=rgba`,"-vf",`ass=filename=${ass}:fontsdir=${fontDir}:alpha=1`,"-frames:v","1","-threads","1",png];
 }
 export class TitleRasterService {
-  private ready:Promise<TitleRendererIdentity>; private entries = new Map<string, Entry>(); private tasks = new Map<string, Task>(); private queue: Task[] = []; private running = false;
-  constructor(initialize:()=>Promise<TitleRendererIdentity> = identity) { this.ready=initialize();void this.ready.catch(()=>undefined); }
-  private lease(entry: Entry): TitleLease { entry.refs++; entry.accessed=Date.now(); let active=true; return { file:entry.file,hash:entry.hash,key:entry.key,release:()=>{if(active){active=false;entry.refs--;if(entry.invalid&&!entry.refs&&!entry.pending)void rm(entry.file,{force:true}).then(()=>{if(this.entries.get(entry.key)===entry)this.entries.delete(entry.key);}).catch(()=>undefined);}} }; }
+  private ready?:Promise<TitleRendererIdentity>; private entries = new Map<string, Entry>(); private tasks = new Map<string, Task>(); private queue: Task[] = []; private running = false;
+  constructor(private initialize:()=>Promise<TitleRendererIdentity> = identity) {}
+  private info(){if(!this.ready){const pending=this.initialize().catch(e=>{if(this.ready===pending)this.ready=undefined;throw e;});this.ready=pending;}return this.ready;}
+  private lease(entry: Entry): TitleLease { entry.refs++; entry.accessed=Date.now(); let active=true; return { file:entry.file,hash:entry.hash,key:entry.key,release:()=>{if(active){active=false;entry.refs--;if(entry.invalid&&!entry.refs&&!entry.pending)void Promise.all([rm(entry.file,{force:true}),rm(entry.metadataFile,{force:true})]).then(()=>{if(this.entries.get(entry.key)===entry)this.entries.delete(entry.key);}).catch(()=>undefined);}} }; }
   async acquire(title: TitleClip, width: number, height: number, signal?: AbortSignal): Promise<TitleLease> {
     const descriptor=validateTitleDescriptor(title as unknown as Record<string,unknown>);
     if (![width,height].every(n=>Number.isInteger(n)&&n>=320&&n<=4096&&n%2===0)) throw new Error("タイトルの構図寸法が不正です。");
     if (signal?.aborted) throw new Error("タイトル生成を取り消しました。");
-    const info=await this.ready; if(signal?.aborted)throw new Error("タイトル生成を取り消しました。");
+    const info=await this.info(); if(signal?.aborted)throw new Error("タイトル生成を取り消しました。");
     const key=digest(JSON.stringify({descriptor,width,height,identity:info.id})), hit=this.entries.get(key);
-    if(hit){if(hit.invalid)throw new Error("タイトルcacheを復旧中です。再試行してください。");const lease=this.lease(hit);try{if(await fileDigest(hit.file)!==hit.hash)throw new Error("タイトルcache実体が一致しません。");return lease;}catch(e){hit.invalid=true;lease.release();throw e;}}
+    if(hit){if(hit.invalid)throw new Error("タイトルcacheを復旧中です。再試行してください。");const lease=this.lease(hit);try{if(await fileDigest(hit.file)!==hit.hash||await fileDigest(hit.metadataFile)!==hit.metadataHash)throw new Error("タイトルcache実体が一致しません。");}catch(e){hit.invalid=true;lease.release();throw e;}if(signal?.aborted){lease.release();throw new Error("タイトル生成を取り消しました。");}return lease;}
     let task=this.tasks.get(key);
     if(task?.controller.signal.aborted){await task.closed;return this.acquire(title,width,height,signal);}
     if (!task) {
@@ -99,27 +103,30 @@ export class TitleRasterService {
     if(this.running)return;const task=this.queue.shift();if(!task)return;this.running=true;clearTimeout(task.timer);
     const deadline=setTimeout(()=>task.controller.abort(),30000);
     try {
-      const info=await this.ready;
+      const info=await this.info();
       let bytes=[...this.entries.values()].reduce((s,e)=>s+e.bytes,0);
-      for(const e of [...this.entries.values()].sort((a,b)=>a.accessed-b.accessed)) {if(bytes+MAX_ENTRY<=MAX_CACHE&&this.entries.size<128)break;if(e.refs||e.pending||e.invalid)continue;this.entries.delete(e.key);bytes-=e.bytes;await rm(e.file,{force:true});}
+      for(const e of [...this.entries.values()].sort((a,b)=>a.accessed-b.accessed)) {if(bytes+MAX_ENTRY<=MAX_CACHE&&this.entries.size<128)break;if(e.refs||e.pending||e.invalid)continue;this.entries.delete(e.key);bytes-=e.bytes;await Promise.all([rm(e.file,{force:true}),rm(e.metadataFile,{force:true})]);}
       if(bytes+MAX_ENTRY>MAX_CACHE||this.entries.size>=128)throw new TitleBusyError("タイトルcache使用中です。少し待って再試行してください。");
       if(digest(await readFile(info.binary))!==info.binaryHash||digest(await readFile(info.font))!==TITLE_FONT_REVISION)throw new Error("固定タイトルrenderer・fontが変更されています。");
       const stage=await mkdtemp(path.join(info.root,"render-"));
       try {
         const ass=path.join(stage,"text.ass"),png=path.join(stage,"image.png"),fit=info.fit(task.title.text,task.width,task.height);
-        let data:Buffer|undefined,fontSize=fit.fontSize;
-        for(let attempt=0;attempt<3;attempt++){
+        let data:Buffer|undefined,fontSize=fit.fontSize,metrics:ReturnType<typeof inspectTitlePng>|undefined;const commands:TitleChildTrace[]=[],logs:string[]=[];
+        for(let attempt=0;attempt<4;attempt++){
           await writeFile(ass,titleAss(task.title.text,task.width,task.height,fontSize));
-          const log=await titleChild(info.binary,rasterArgs(ass,png,info.fontDir,task.width,task.height),{env:info.env,signal:task.controller.signal});assertFontLog(log);
+          const log=await titleChild(info.binary,rasterArgs(ass,png,info.fontDir,task.width,task.height),{env:info.env,signal:task.controller.signal,onComplete:trace=>{commands.push(trace);}});logs.push(log);assertFontLog(log);
           const size=(await stat(png)).size;if(size>MAX_ENTRY)throw new Error("タイトルPNGが容量上限を超えました。");
-          const candidate=await readFile(png),metrics=inspectTitlePng(candidate,task.width,task.height),[l,t,r,b]=metrics.bbox;
+          const candidate=await readFile(png);metrics=inspectTitlePng(candidate,task.width,task.height);const [l,t,r,b]=metrics.bbox;
           if(l>=fit.margin&&t>=fit.margin&&r<=task.width-fit.margin&&b<=task.height-fit.margin){data=candidate;break;}
           fontSize=Math.floor(fontSize*.85*4)/4;if(fontSize<12)break;
         }
         if(!data)throw new Error("タイトルの文字が構図に収まりません。本文を短くするか手動改行を調整してください。");
         if(task.controller.signal.aborted)throw new Error("タイトル生成を取り消しました。");
-        const file=path.join(info.root,`${task.key}.png`);await rename(png,file);await chmod(file,0o400);
-        const entry:Entry={key:task.key,file,bytes:data.length,hash:digest(data),refs:0,pending:task.owners.size,accessed:Date.now()};task.entry=entry;this.entries.set(task.key,entry);task.resolve(entry);
+        const hash=digest(data),metadata=JSON.stringify({key:task.key,rendererIdentity:info.id,binaryHash:info.binaryHash,fontHash:TITLE_FONT_REVISION,width:task.width,height:task.height,descriptor:validateTitleDescriptor(task.title as unknown as Record<string,unknown>),fontSize,metrics,hash,commands,logs}),metadataFile=path.join(info.root,`${task.key}.json`);
+        if(data.length+Buffer.byteLength(metadata)>MAX_ENTRY)throw new Error("タイトルPNG/metricsが容量上限を超えました。");
+        const tempMeta=path.join(stage,"metadata.json"),file=path.join(info.root,`${task.key}.png`);await writeFile(tempMeta,metadata,{mode:0o400});
+        await rename(tempMeta,metadataFile);try{await rename(png,file);await chmod(file,0o400);}catch(e){await rm(metadataFile,{force:true});throw e;}
+        const entry:Entry={key:task.key,file,metadataFile,metadataHash:digest(metadata),bytes:data.length+Buffer.byteLength(metadata),hash,refs:0,pending:task.owners.size,accessed:Date.now()};task.entry=entry;this.entries.set(task.key,entry);task.resolve(entry);
       }finally{await rm(stage,{recursive:true,force:true});}
     }catch(e){task.reject(e);}finally{clearTimeout(deadline);this.tasks.delete(task.key);this.running=false;task.close();void this.pump();}
   }

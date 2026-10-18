@@ -16,7 +16,7 @@ export function titleFontMetrics(bytes:Uint8Array){
  const verticalInk=(i16(head+42)-i16(head+38))/units,lineHeight=Math.max((i16(hhea+4)-i16(hhea+6)+i16(hhea+8))/units,1);
  if(!Number.isFinite(horizontalInk+verticalInk+lineHeight)||horizontalInk<=0||verticalInk<=0||lineHeight<=0)throw new Error("タイトルfont bboxが不正です。");
  return(text:string,width:number,height:number)=>{
-  const lines=text.split("\n"),margin=Math.max(2,Math.min(width,height)*.02),outlineEm=1/24;
+  const lines=text.split("\n"),margin=Math.max(2,Math.ceil(Math.min(width,height)*.02)),outlineEm=1/24;
   const lineWidths=lines.map(line=>[...line].reduce((s,c)=>s+advance(c.codePointAt(0)!),0));
   const widthEm=Math.max(...lineWidths)+horizontalInk+outlineEm*2,heightEm=verticalInk+(lines.length-1)*lineHeight+outlineEm*2;
   const size=Math.floor(Math.min(height*.08,(width-2*margin)/widthEm,(height-2*margin)/heightEm)*4)/4;

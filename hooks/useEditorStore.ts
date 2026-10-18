@@ -2,6 +2,7 @@
 
 import { isMediaClip } from "@/lib/editor/types";
 import { validateTitleText, titleDescriptor, matchesTitleEditSnapshot, type TitleEditSnapshot } from "@/lib/editor/title";
+import { requestTitleRaster } from "@/lib/editor/titleRasterClient";
 
 import { useRestoreInputAudio } from "@/hooks/useRestoreInputAudio";
 import { matchesClipAudioSnapshot, mergedAudioGain, type ClipAudioSnapshot } from "@/lib/editor/clipAudio";
@@ -502,7 +503,7 @@ export function useEditorStore() {
   useEffect(()=>()=>{titleRequestRef.current?.abort();},[projectEpoch]);
   const preflightTitle=useCallback(async(text:string,current:EditorProject)=>{
     titleRequestRef.current?.abort();const controller=new AbortController();titleRequestRef.current=controller;
-    const response=await fetch("/api/titles/raster",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...titleDescriptor(text),width:current.compositionWidth,height:current.compositionHeight}),signal:controller.signal});
+    const response=await requestTitleRaster(titleDescriptor(text),current.compositionWidth,current.compositionHeight,controller.signal);
     if(!response.ok){const json=await response.json();throw new Error(json.error??"タイトル生成に失敗しました。");}
     await response.body?.cancel();
     return controller;
@@ -580,17 +581,40 @@ export function useEditorStore() {
     });
   }, []);
 
-  const setCompositionSize = useCallback((width: number, height: number) => {
+  const setCompositionSize = useCallback(async(width: number, height: number) => {
+    const source=latestHistoryRef.current,current=getCurrentProject(source),epoch=projectEpochRef.current;
+    if(current.clips.some(c=>c.kind==="title")){
+      if(areEditorShortcutsBlocked()||(current.compositionWidth===width&&current.compositionHeight===height))return;
+      try{
+        let request:AbortController|undefined;
+        const texts=[...new Set(current.clips.filter(c=>c.kind==="title").map(c=>c.text))];
+        for(const text of texts){
+          try{request=await preflightTitle(text,{...current,compositionWidth:width,compositionHeight:height});}
+          catch(e){if(e instanceof Error&&e.name==="AbortError")return;throw new Error(`タイトル「${text.split("\n")[0].slice(0,30)}」: ${e instanceof Error?e.message:String(e)}`);}
+          if(request.signal.aborted||latestHistoryRef.current!==source||projectEpochRef.current!==epoch||areEditorShortcutsBlocked())return;
+        }
+        setError(null);setHistory(h=>h===source&&projectEpochRef.current===epoch&&!areEditorShortcutsBlocked()&&!request?.signal.aborted?{undoStack:[...h.undoStack,{...current,compositionWidth:width,compositionHeight:height}],redoStack:[]}:h);
+      }catch(e){if(projectEpochRef.current===epoch&&latestHistoryRef.current===source)setError(e instanceof Error?e.message:String(e));}
+      return;
+    }
     setHistory((h) => {
       const cur = getCurrentProject(h);
       if (cur.compositionWidth === width && cur.compositionHeight === height) return h;
       const next: EditorProject = { ...cur, compositionWidth: width, compositionHeight: height };
       return { undoStack: [...h.undoStack, next], redoStack: [] };
     });
-  }, []);
+  }, [areEditorShortcutsBlocked,preflightTitle]);
 
   const matchCompositionToSelectedClip = useCallback(() => {
     setError(null);
+    const source=latestProjectRef.current;
+    if(source.clips.some(c=>c.kind==="title")){
+      const clip=source.clips.find(c=>c.id===source.selectedClipIds[0]);
+      if(!clip||!isMediaClip(clip)){setError("解像度を合わせる素材クリップを選択してください。");return;}
+      const asset=findAsset(source.assets,clip.parts[0]?.assetId??"");
+      if(!asset?.width||!asset.height){setError("選択クリップの素材解像度が不明です。");return;}
+      const size=compositionSizeFromAsset(asset.width,asset.height);void setCompositionSize(size.width,size.height);return;
+    }
     setHistory((h) => {
       const cur = getCurrentProject(h);
       const selectedId = cur.selectedClipIds[0];
@@ -619,7 +643,7 @@ export function useEditorStore() {
       };
       return { undoStack: [...h.undoStack, next], redoStack: [] };
     });
-  }, []);
+  }, [setCompositionSize]);
 
   const exportSelectedClips = useCallback(async () => {
     setError(null);

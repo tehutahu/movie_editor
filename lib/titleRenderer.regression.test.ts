@@ -13,11 +13,11 @@ const roots:string[]=[];
 afterAll(async()=>{for(const root of roots)await rm(root,{recursive:true,force:true});});
 it("reclaims only proven stale derived owner generations and rejects a live owner",async()=>{
  const root=await mkdtemp(path.join(tmpdir(),"title-owner-test-"));roots.push(root);
- const first=await claimTitleCacheOwner(root);await writeFile(path.join(first,"owned-only"),"derived");
+ const first=(await claimTitleCacheOwner(root)).directory;await writeFile(path.join(first,"owned-only"),"derived");
  await expect(claimTitleCacheOwner(root)).rejects.toThrow(/稼働中/);
  const lease=(await readdir(root)).find(x=>x.startsWith("lease-"))!;
  const data=JSON.parse(await readFile(path.join(root,lease),"utf8"));data.boot="previous-boot";await chmod(path.join(root,lease),0o600);await writeFile(path.join(root,lease),JSON.stringify(data));
- const second=await claimTitleCacheOwner(root);expect(second).not.toBe(first);await expect(readFile(path.join(first,"owned-only"))).rejects.toThrow();
+ const second=(await claimTitleCacheOwner(root)).directory;expect(second).not.toBe(first);await expect(readFile(path.join(first,"owned-only"))).rejects.toThrow();
  expect((await readdir(root)).filter(x=>x.startsWith("owner-"))).toHaveLength(1);expect((await readdir(root)).filter(x=>x.startsWith("lease-"))).toHaveLength(1);
 });
 it("serializes concurrent actual process owners, preserves the live one and reclaims it after exit",async()=>{
@@ -32,7 +32,7 @@ it("serializes concurrent actual process owners, preserves the live one and recl
  });
  try{const results=await Promise.all(owned.map(x=>x.result));expect(results.filter(r=>r.ok)).toHaveLength(1);await expect(claimTitleCacheOwner(root)).rejects.toThrow(/稼働中/);}
  finally{for(const o of owned){o.child.stdin.end();if(o.child.exitCode===null)o.child.kill("SIGTERM");}await Promise.all(owned.map(o=>o.closed));}
- const next=await claimTitleCacheOwner(root);expect(await readdir(next)).toEqual([]);expect((await readdir(root)).filter(x=>x.startsWith("owner-"))).toHaveLength(1);
+ const next=(await claimTitleCacheOwner(root)).directory;expect(await readdir(next)).toEqual([]);expect((await readdir(root)).filter(x=>x.startsWith("owner-"))).toHaveLength(1);
 },15000);
 it.skipIf(process.env.RUN_FFMPEG_TESTS!=="1")("real canonical title renderer validates identity, JP face, alpha, CRC, dedup and cache corruption",async()=>{
  const root=await mkdtemp(path.join(tmpdir(),"title-renderer-test-"));roots.push(root);
@@ -47,6 +47,11 @@ it.skipIf(process.env.RUN_FFMPEG_TESTS!=="1")("real canonical title renderer val
   expect(createHash("sha256").update(png).digest("hex")).toBe(a.hash);
   const corrupt=Buffer.from(png);corrupt[corrupt.length-5]^=1;expect(()=>inspectTitlePng(corrupt,320,320)).toThrow(/CRC/);
   a.release();b.release();const hit=await service.acquire(clip,320,320);expect(hit.hash).toBe(a.hash);hit.release();
+  const metadata=JSON.parse(await readFile(a.file.replace(/\.png$/,".json"),"utf8"));expect(metadata.commands.every((c:{exit:number})=>c.exit===0)).toBe(true);expect(metadata.commands.length).toBeGreaterThan(0);
   await chmod(a.file,0o600);await writeFile(a.file,"corrupt");await expect(service.acquire(clip,320,320)).rejects.toThrow(/cache/);
+  const entries=(service as unknown as {entries:Map<string,unknown>}).entries;
+  await vi.waitFor(()=>expect(entries.has(a.key)).toBe(false));const regenerated=await service.acquire(clip,320,320);expect(regenerated.hash).toBe(a.hash);regenerated.release();
+  await rm(a.file.replace(/\.png$/,".json"));await expect(service.acquire(clip,320,320)).rejects.toThrow();
+  await vi.waitFor(()=>expect(entries.has(a.key)).toBe(false));const missingMetadata=await service.acquire(clip,320,320);expect(missingMetadata.hash).toBe(a.hash);missingMetadata.release();
  }finally{if(oldRoot===undefined)delete process.env.MOVIE_EDITOR_STORAGE_ROOT;else process.env.MOVIE_EDITOR_STORAGE_ROOT=oldRoot;}
 },30000);

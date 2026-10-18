@@ -840,7 +840,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
         onPointerMove={onWrapPointerMove}
         onPointerLeave={onWrapPointerLeave}
       >
-        {titleImages.status&&<p role="status" className="title-preview-status">{titleImages.status}</p>}
+        {titleImages.status&&<p role="status" className="title-preview-status">{titleImages.status}{titleImages.status!=="タイトルを生成中…"&&<button type="button" onClick={titleImages.retry}>タイトル表示を再試行</button>}</p>}
       <canvas
           ref={canvasRef}
           className="compositor-canvas"
