@@ -1,3 +1,4 @@
+import { normalizeAudioFade, validateAudioFade } from "./clipAudioFade";
 import { validateTitleDescriptor } from "./title";
 import { validAudioGain } from "./clipAudio";
 import {
@@ -189,6 +190,7 @@ export function parseClip(
     throw new Error(`clips[${index}].parts が多すぎます。`);
   }
 
+  const audioFade = Object.hasOwn(o, "audioFade") ? normalizeAudioFade(validateAudioFade(o.audioFade)) : undefined;
   const parts = o.parts.map((part, pi) => parseClipPart(part, pi, assetIds));
   const partsDuration = parts.reduce((sum, p) => sum + p.sourceOutSec - p.sourceInSec, 0);
   if (Math.abs(partsDuration - durationSec) > 1e-6) {
@@ -205,6 +207,7 @@ export function parseClip(
     transform: parseTransform(o.transform, `clips[${index}].transform`),
     ...(o.layoutMode === undefined ? {} : { layoutMode: o.layoutMode as Clip["layoutMode"] }),
     ...(o.audioGain === undefined ? {} : { audioGain: o.audioGain as number }),
+    ...(audioFade ? { audioFade } : {}),
   };
 }
 

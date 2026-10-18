@@ -1,3 +1,4 @@
+import { normalizeAudioFade } from "./clipAudioFade";
 import { isMediaClip } from "./types";
 import type { Asset, EditorProject } from "./types";
 import {
@@ -25,7 +26,7 @@ export type MediaReference = {
 };
 export type ProjectDocument = {
   format: "movie-editor-project";
-  version: 1 | 2 | 3 | 4;
+  version: 1 | 2 | 3 | 4 | 5;
   project: Pick<
     EditorProject,
     | "tracks"
@@ -68,7 +69,7 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
   )
     throw new Error("JSON サイズが上限を超えています。");
   const doc = record(raw);
-  if (doc.format !== "movie-editor-project" || (doc.version !== 1 && doc.version !== 2 && doc.version !== 3 && doc.version !== 4))
+  if (doc.format !== "movie-editor-project" || (doc.version !== 1 && doc.version !== 2 && doc.version !== 3 && doc.version !== 4 && doc.version !== 5))
     throw new Error("未対応のプロジェクト形式・version です。");
   const p = record(doc.project);
   const duration = assertStrictFiniteNumber(
@@ -144,10 +145,12 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
   )
     throw new Error("トラック順が不正です。");
   const clips = array(p.clips, 100).map((c, i) => {
-    if (doc.version !== 4 && record(c).kind === "title") throw new Error("タイトルにはproject v4が必要です。");
+    if (doc.version !== 4 && doc.version !== 5 && record(c).kind === "title") throw new Error("タイトルにはproject v4が必要です。");
     if (doc.version === 1 && Object.hasOwn(record(c), "layoutMode"))
       throw new Error("v1 に配置モードは指定できません。");
-    if (doc.version !== 3 && doc.version !== 4 && Object.hasOwn(record(c), "audioGain")) throw new Error("v1/v2 に音量は指定できません。");
+    if (doc.version !== 3 && doc.version !== 4 && doc.version !== 5 && Object.hasOwn(record(c), "audioGain")) throw new Error("v1/v2 に音量は指定できません。");
+    if (doc.version === 5 && record(c).kind !== "title" && Object.keys(record(c)).some(k => !["kind", "id", "trackId", "timelineStartSec", "durationSec", "transform", "parts", "layoutMode", "audioGain", "audioFade"].includes(k))) throw new Error("v5 clipに未知fieldは指定できません。");
+    if (doc.version !== 5 && Object.hasOwn(record(c), "audioFade")) throw new Error("フェードにはproject v5が必要です。");
     return parseClip(
       c,
       i,
@@ -172,7 +175,7 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
     }
   return {
     format: "movie-editor-project",
-    version: doc.version as 1 | 2 | 3 | 4,
+    version: doc.version as 1 | 2 | 3 | 4 | 5,
     project: {
       assets,
       tracks,
@@ -188,13 +191,14 @@ export function parseProjectDocument(raw: unknown): ProjectDocument {
 export function projectDocumentDraft(project: EditorProject): ProjectDocument {
   return {
     format: "movie-editor-project",
-    version: project.clips.some(c => c.kind === "title") ? 4 : project.clips.some(c => (c.audioGain ?? 1) !== 1) ? 3 : project.clips.some(c => c.layoutMode === "contain") ? 2 : 1,
+    version: project.clips.some(c => isMediaClip(c) && normalizeAudioFade(c.audioFade)) ? 5 : project.clips.some(c => c.kind === "title") ? 4 : project.clips.some(c => (c.audioGain ?? 1) !== 1) ? 3 : project.clips.some(c => c.layoutMode === "contain") ? 2 : 1,
     project: {
       tracks: structuredClone(project.tracks),
       clips: project.clips.map(c => {
         if (!isMediaClip(c)) return structuredClone(c);
-        const { layoutMode, audioGain, ...clip } = structuredClone(c);
-        return { ...clip, ...(layoutMode === "contain" ? { layoutMode } : {}), ...(audioGain !== undefined && audioGain !== 1 ? { audioGain } : {}) };
+        const { layoutMode, audioGain, audioFade, ...clip } = structuredClone(c);
+        const fade = normalizeAudioFade(audioFade);
+        return { ...clip, ...(layoutMode === "contain" ? { layoutMode } : {}), ...(audioGain !== undefined && audioGain !== 1 ? { audioGain } : {}), ...(fade ? { audioFade: fade } : {}) };
       }),
       compositionWidth: project.compositionWidth,
       compositionHeight: project.compositionHeight,

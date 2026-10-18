@@ -1,3 +1,4 @@
+import { shiftedAudioFade, withAudioFade } from "./clipAudioFade";
 import { isMediaClip, type MediaClip } from "./types";
 import { MIN_CLIP_DURATION_SEC, type Clip, type EditorProject } from "@/lib/editor/types";
 
@@ -123,7 +124,7 @@ export function trimClipStart(project: EditorProject, clipId: string, requestedS
     if (chosen) { parts.splice(0, parts.length, ...chosen.parts); durationSec = chosen.duration; }
   }
   if (durationSec === undefined) return null;
-  const next = { ...clip, timelineStartSec: start, durationSec, parts };
+  const next = withAudioFade({ ...clip, timelineStartSec: start, durationSec, parts }, shiftedAudioFade(clip.audioFade, prefix));
   return { ...project, clips: project.clips.map(c => c === clip ? next : c) };
 }
 

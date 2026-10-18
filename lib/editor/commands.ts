@@ -1,3 +1,4 @@
+import { clearClipAudioFade, setClipAudioFade } from "./clipAudioFade";
 import { addTitle, updateTitle } from "./title";
 import { isMediaClip } from "./types";
 import { setClipAudioGain } from "@/lib/editor/clipAudio";
@@ -19,6 +20,8 @@ import {
 import { addTrackToProject, deleteEmptyTrackFromProject } from "@/lib/editor/project";
 
 export type EditorCommand =
+  | { type: "audioFade"; clipId: string; inSec: number; outSec: number }
+  | { type: "clearAudioFade"; clipId: string }
   | { type: "addTitle"; id: string; text: string }
   | { type: "titleText"; clipId: string; text: string }
   | { type: "trimStart"; clipId: string; atSec: number }
@@ -51,6 +54,8 @@ export function applyCommand(
   command: EditorCommand,
 ): EditorProject | null {
   switch (command.type) {
+    case "audioFade": return setClipAudioFade(project, command.clipId, command.inSec, command.outSec);
+    case "clearAudioFade": return clearClipAudioFade(project, command.clipId);
     case "addTitle": return addTitle(project, command.id, command.text);
     case "titleText": return updateTitle(project, command.clipId, command.text);
     case "trimStart": {

@@ -1,3 +1,4 @@
+import { assetHasAudioFade } from "./clipAudioFade";
 import { isMediaClip } from "./types";
 import { computeCompositionDuration } from "@/lib/editor/project";
 import { MIN_CLIP_DURATION_SEC, type ClipPart, type EditorProject } from "@/lib/editor/types";
@@ -66,6 +67,7 @@ export function applySpeedRestoreToProject(
 ): EditorProject {
   const { assetId, jobId, speedFactor, restoredDurationSec, restoredWidth, restoredHeight } = params;
   assertRestoreResult(params);
+  if (assetHasAudioFade(project, assetId)) throw new Error("該当clipのフェードを解除してから復元してください。");
   if (!(speedFactor > 0) || !Number.isFinite(speedFactor)) {
     throw new Error("速度係数が不正です。");
   }

@@ -44,12 +44,15 @@ export type ClipBase = {
   transform: ClipTransform;
 };
 
+export type AudioFade = { inSec: number; outSec: number; anchorDurationSec: number; offsetSec: number };
+
 export type MediaClip = ClipBase & {
   kind?: "media";
   parts: ClipPart[];
   layoutMode?: ClipLayoutMode;
   /** Linear audio gain; omitted means 1, zero silences without changing selection. */
   audioGain?: number;
+  audioFade?: AudioFade;
 };
 
 export type TitleClip = ClipBase & {
@@ -61,6 +64,7 @@ export type TitleClip = ClipBase & {
   /** These media fields are forbidden in title descriptors. */
   parts?: never;
   audioGain?: never;
+  audioFade?: never;
   layoutMode?: never;
 };
 export type Clip = MediaClip | TitleClip;

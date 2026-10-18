@@ -173,6 +173,25 @@ export async function assertFfmpegAvailable(): Promise<{
   return { ffmpeg: ffmpegPath, ffprobe: ffprobePath };
 }
 
+const audioFadeCapabilities = new Map<string, Promise<void>>();
+/** Partial endpoints require both silence and unity, not just basic afade. */
+export function assertAudioFadeAvailable(): Promise<void> {
+  const binary = resolveFfmpegPath();
+  let ready = audioFadeCapabilities.get(binary);
+  if (!ready) {
+    ready = (async () => {
+      const result = await run(binary, ["-hide_banner", "-h", "filter=afade"]);
+      const help = result.stdout + result.stderr;
+      if (result.exitCode !== 0 || !["start_sample", "nb_samples", "silence", "unity"].every(option => new RegExp("\\b" + option + "\\b").test(help))) {
+        throw new Error("このffmpegは部分区間の音声フェードに対応していません。");
+      }
+    })();
+    audioFadeCapabilities.set(binary, ready);
+    void ready.catch(() => { if (audioFadeCapabilities.get(binary) === ready) audioFadeCapabilities.delete(binary); });
+  }
+  return ready;
+}
+
 export type FfProbeJson = {
   format?: { duration?: string; format_name?: string; start_time?: string };
   streams?: (VideoDisplayStream & { codec_type?: string; codec_name?: string; channels?: number; bits_per_sample?: number; index?: number; sample_rate?: string; start_time?: string; start_pts?: number | string; time_base?: string; duration?: string; duration_ts?: number | string; sample_aspect_ratio?: string; nb_frames?: string; tags?: Record<string, string>; side_data_list?: { side_data_type?: string; rotation?: unknown; displaymatrix?: string }[] })[];
