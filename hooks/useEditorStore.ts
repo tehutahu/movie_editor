@@ -32,6 +32,7 @@ import {
   updateEditorView,
   type CommandHistory,
 } from "@/lib/editor/commandHistory";
+import { matchesTrimEndSnapshot, type TrimEndSnapshot } from "@/lib/editor/trimClipEnd";
 import { matchesTrimStartSnapshot, type TrimStartSnapshot } from "@/lib/editor/trimClipStart";
 import { newId } from "@/lib/newId";
 import type { EditorCommand } from "@/lib/editor/commands";
@@ -418,6 +419,15 @@ export function useEditorStore() {
       return dispatchCommand(current, { type: "trimStart", clipId: snapshot.clipId, atSec: cur.playheadSec })?.history ?? current;
     });
   }, []);
+
+  const trimSelectedEndAtPlayhead = useCallback((snapshot: TrimEndSnapshot | null) => {
+    if (!snapshot || areEditorShortcutsBlocked()) return;
+    setHistory(current => {
+      const cur = getCurrentProject(current);
+      if (areEditorShortcutsBlocked() || !matchesTrimEndSnapshot(cur, projectEpochRef.current, snapshot)) return current;
+      return dispatchCommand(current, { type: "trimEnd", clipId: snapshot.clipId, atSec: cur.playheadSec })?.history ?? current;
+    });
+  }, [areEditorShortcutsBlocked]);
 
   const splitAtPlayhead = useCallback(() => {
     const cur = getCurrentProject(history);
@@ -994,6 +1004,7 @@ export function useEditorStore() {
     addTrack,
     deleteEmptyTrack,
     trimSelectedStartAtPlayhead,
+    trimSelectedEndAtPlayhead,
     splitAtPlayhead,
     mergeSelected,
     deleteSelected,

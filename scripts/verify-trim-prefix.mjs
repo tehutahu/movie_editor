@@ -1,4 +1,4 @@
-/* global document, structuredClone */
+/* global document, structuredClone, KeyboardEvent, requestAnimationFrame */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import console from 'node:console';
@@ -31,8 +31,9 @@ async function seek(t){const point=await visiblePointerPoint(page,page.locator('
   await suite.start();const browser=await suite.launch();page=await browser.newPage({viewport:{width:1800,height:1000}});
   page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()==='DELETE'||r.url().includes('/api/storage/prune')||(r.url().includes('/api/storage/session')&&r.postDataJSON()?.action==='release'))forbidden.push(r.url());});
   await page.goto(baseURL);const trim=page.locator('[data-trim-start]');
+  const trimReasonId=await trim.getAttribute('aria-describedby');assert(trimReasonId);const trimReason=page.locator(`[id=${JSON.stringify(trimReasonId)}]`);
   const undo=page.getByTitle('Undo (Ctrl+Z)',{exact:true}),redo=page.getByTitle('Redo (Shift+Ctrl+Z)',{exact:true});
-  await trim.focus();check('unselected control exposes a focus-visible disabled reason',await trim.getAttribute('aria-disabled')==='true'&&await page.locator('.trim-start-reason').isVisible());
+  await trim.focus();check('unselected control exposes a focus-visible disabled reason',await trim.getAttribute('aria-disabled')==='true'&&await trimReason.isVisible());
   await page.locator('.asset-library input[type=file]').setInputFiles(`${evidence}/source.mp4`);await page.locator('.asset-card').waitFor();await page.waitForFunction(()=>!document.querySelector('.busy-banner'));
   await dragToVisibleTarget(page, page.locator('.asset-card'), page.locator('.timeline-track-row').first(),{targetPosition:{x:48,y:30}});await page.locator('.timeline-clip').waitFor();
   const template=await save();
@@ -41,8 +42,13 @@ async function seek(t){const point=await visiblePointerPoint(page,page.locator('
     c.parts=[{assetId:c.parts[0].assetId,sourceInSec:1,sourceOutSec:2},{assetId:c.parts[0].assetId,sourceInSec:3,sourceOutSec:6}];
     c.transform={x:.4,y:.6,scale:.8};if(contain)c.layoutMode='contain';doc.project.compositionDurationSec=12;doc.project.compositionWidth=320;doc.project.compositionHeight=320;
     await load(doc,`input-${contain}`);await trim.focus();await page.locator('.timeline-clip').click({position:{x:30,y:10}});
-    await page.locator('.timeline-scroll').scrollIntoViewIfNeeded();
-    const tip=await page.locator('.trim-start-reason').boundingBox(),ruler=await page.locator('.timeline-ruler').boundingBox(),scroll=await page.locator('.timeline-scroll').boundingBox();
+    // This pointer-through case needs a real tooltip/ruler overlap. The new
+    // toolbar wraps at 1800; use the measured natural 2200 layout only here.
+    await page.setViewportSize({width:2200,height:1000});
+    try {
+    await page.locator('.timeline-scroll').scrollIntoViewIfNeeded();await trim.focus();
+    await page.evaluate(()=>new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok))));
+    const tip=await trimReason.boundingBox(),ruler=await page.locator('.timeline-ruler').boundingBox(),scroll=await page.locator('.timeline-scroll').boundingBox();
     assert(tip&&ruler&&scroll);const left=Math.max(tip.x,ruler.x),right=Math.min(tip.x+tip.width,ruler.x+ruler.width),top=Math.max(tip.y,ruler.y),bottom=Math.min(tip.y+tip.height,ruler.y+ruler.height);
     assert(right>left&&bottom>top,'focused explanation must actually overlap the ruler');
     const x=(left+right)/2,y=(top+bottom)/2,scrollLeft=await page.locator('.timeline-scroll').evaluate(e=>e.scrollLeft),expectedSec=(x-scroll.x-48+scrollLeft)/80;
@@ -52,6 +58,7 @@ async function seek(t){const point=await visiblePointerPoint(page,page.locator('
     await page.mouse.click(x,y);
     await page.waitForFunction(expected=>Math.abs(parseFloat(document.querySelector('.timeline-ruler .timeline-playhead').style.left)-(48+expected*80))<.01,expectedSec);
     check(`${contain?'v2':'v1'} ruler click inside the focused explanation overlap changes the playhead after clip selection`);
+    } finally { await page.setViewportSize({width:1800,height:1000}); }
     await seek(3.5);
     await trim.focus();await page.keyboard.press(contain?'Enter':'Space');
     await page.waitForFunction(()=>parseFloat(document.querySelector('.timeline-clip').style.left)===328);
@@ -87,5 +94,30 @@ async function seek(t){const point=await visiblePointerPoint(page,page.locator('
   const imageSaved=await save();assert.deepEqual(imageSaved.project.clips[0],{...imageDoc.project.clips[0],timelineStartSec:.5,durationSec:1.5,parts:[{assetId:image.id,sourceInSec:.5,sourceOutSec:2}]});
   assert.deepEqual(imageSaved.project.assets,imageDoc.project.assets);
   check('image prefix trim preserves the media fingerprints and image-duration contract');
+  const endTrim=page.locator('[data-trim-end]');
+  const endDoc=structuredClone(template);endDoc.version=1;endDoc.project.compositionDurationSec=12;
+  const endClip=endDoc.project.clips[0];endClip.timelineStartSec=2;endClip.durationSec=4;
+  endClip.parts=[{assetId:endClip.parts[0].assetId,sourceInSec:1,sourceOutSec:2},{assetId:endClip.parts[0].assetId,sourceInSec:3,sourceOutSec:6}];
+  for(const viewport of [{width:1440,height:1000},{width:1280,height:720}]){
+    await page.setViewportSize(viewport);await load(endDoc,`end-input-${viewport.width}`);
+    await endTrim.focus();check(`${viewport.width} end trim exposes the unselected reason`,await endTrim.getAttribute('aria-disabled')==='true');
+    await page.locator('.timeline-clip').click({position:{x:20,y:10}});
+    await page.getByTitle('トラック追加 (Ctrl+T)',{exact:true}).click();await undo.click();assert(await redo.isEnabled());
+    const exactSeek=page.getByRole('textbox',{name:'再生位置',exact:true});
+    const exact=async time=>{await exactSeek.fill(String(time));await exactSeek.press('Enter');await exactSeek.blur();};
+    await exact(7);const invalidPoint=await visiblePointerPoint(page,endTrim);await assertPointerHit(page,endTrim,invalidPoint);await page.mouse.click(invalidPoint.x,invalidPoint.y);assert(await redo.isEnabled());
+    check(`${viewport.width} invalid end trim preserves pending Redo`,await endTrim.getAttribute('aria-disabled')==='true');
+    await exact(4.5);await endTrim.scrollIntoViewIfNeeded();
+    check(`${viewport.width} end trim is actually hit-testable`,await endTrim.evaluate(el=>{const b=el.getBoundingClientRect();return el.contains(document.elementFromPoint(b.x+b.width/2,b.y+b.height/2));}));
+    await endTrim.focus();const imeDispatched=await endTrim.evaluate(el=>el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:229,isComposing:true,bubbles:true,cancelable:true})));assert(await redo.isEnabled());check(`${viewport.width} end trim prevents IME confirmation activation`,imeDispatched===false);
+    await page.keyboard.press(viewport.width===1440?'Space':'Enter');
+    await page.waitForFunction(()=>Math.abs(parseFloat(document.querySelector('.timeline-clip').style.width)-200)<.01);
+    const trimmed=await save(),expected={...endClip,durationSec:2.5,parts:[endClip.parts[0],{...endClip.parts[1],sourceOutSec:4.5}]};
+    assert.deepEqual(trimmed.project.clips,[expected]);assert.deepEqual({...trimmed.project,clips:endDoc.project.clips},endDoc.project);
+    check(`${viewport.width} end trim keyboard preserves prefix, composition duration and saved references in one edit`);
+    await undo.click();assert.deepEqual((await save()).project,endDoc.project);await redo.click();assert.deepEqual((await save()).project,trimmed.project);
+    check(`${viewport.width} end trim has exact one Undo and one Redo`);
+    await captureEvidenceScreenshot(page,`${evidence}/trim-end-${viewport.width}.png`);
+  }
   check('trim never releases, prunes or deletes media',forbidden.length===0);check('no uncaught browser errors',errors.length===0);
 })().catch(async e=>{console.error(e);fs.writeFileSync(`${evidence}/failure.txt`,String(e.stack??e));if(page&&!page.isClosed())await page.screenshot({path:`${evidence}/failure.png`}).catch(()=>{ /* Preserve original failure. */ });process.exitCode=1;}).finally(()=>suite.cleanup());

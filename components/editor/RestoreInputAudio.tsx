@@ -10,7 +10,8 @@ export function RestoreInputAudio({ editor }: { editor: EditorStore }) {
     : input.status === "error" ? "入力音声を取得できませんでした。手動の設定で復元できます。"
     : audio?.status === "none" ? "音声なし。Hzの設定は使いません。"
     : audio?.status === "unknown" ? "入力のHzを取得できません。手動の設定で復元できます。" : "";
-  return <div className="restore-rate-support" data-restore-input-audio onKeyDown={event => event.stopPropagation()}>
+  // Placement owner removes inert only after a valid viewport box is ready.
+  return <div className="restore-rate-support" data-restore-input-audio inert onKeyDown={event => event.stopPropagation()}>
     <p className="muted" aria-live="polite">{input.hasTarget ? `復元対象: ${input.targetName}（選択した先頭クリップの先頭素材）` : reason}</p>
     {input.hasTarget && <>
       <p className="muted" data-input-rate-status>{known ? `取得時の入力音声: ${audio.sampleRateHz} Hz（音声トラック1 / a:0）` : reason}</p>

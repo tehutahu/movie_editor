@@ -1,8 +1,10 @@
 "use client";
 import { ClipAudioControl } from "./ClipAudioControl";
 import { RestoreInputAudio, RestoreInputAudioSummary } from "./RestoreInputAudio";
+import { useRestorePopupPlacement } from "@/hooks/useRestorePopupPlacement";
 
 import { groupMoveSnapshot, matchesGroupMoveSnapshot, resolveGroupMove, type GroupMoveSnapshot, type GroupMovePlan } from "@/lib/editor/moveClips";
+import { trimEndReason, trimEndSnapshot } from "@/lib/editor/trimClipEnd";
 import { trimStartReason, trimStartSnapshot } from "@/lib/editor/trimClipStart";
 import type { EditorProject } from "@/lib/editor/types";
 import type { EditorStore } from "@/hooks/useEditorStore";
@@ -65,12 +67,18 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
   } = editor;
 
   const selectedTitle=project.clips.some(c=>project.selectedClipIds.includes(c.id)&&c.kind==="title");
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const restoreDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  useRestorePopupPlacement(toolbarRef, restoreDetailsRef, editor.projectEpoch);
   const trimReasonId = useId();
+  const endReasonId = useId();
+  const endSnapshot = trimEndSnapshot(project, editor.projectEpoch);
+  const endReason = busy || editor.persistence.locked ? "処理が終わってから操作してください。" : trimEndReason(project);
   const trimSnapshot = trimStartSnapshot(project, editor.projectEpoch);
   const trimReason = busy || editor.persistence.locked ? "処理が終わってから操作してください。" : trimStartReason(project);
 
   return (
-    <div className="timeline-toolbar">
+    <div className="timeline-toolbar" ref={toolbarRef}>
       <div className="timeline-toolbar-left">
         <button type="button" data-add-track onClick={addTrack} disabled={Boolean(busy)} title="トラック追加 (Ctrl+T)">
           +
@@ -87,6 +95,19 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
             先頭を再生位置まで短縮
           </button>
           <span className="trim-start-reason" id={trimReasonId}>{trimReason ?? "末尾を維持し、先頭だけ短縮します。"}</span>
+        </span>
+        <span className="trim-start-action">
+          <button type="button" data-trim-end aria-disabled={Boolean(endReason)} aria-describedby={endReasonId}
+            title={endReason ?? "末尾を再生位置まで短縮します。先頭と合成時間は維持します。"}
+            onPointerDown={e => e.stopPropagation()}
+            onKeyDown={e => {
+              if (e.key === " " || e.key === "Enter") e.stopPropagation();
+              if (e.nativeEvent.isComposing || e.keyCode === 229) e.preventDefault();
+            }}
+            onClick={() => editor.trimSelectedEndAtPlayhead(endSnapshot)}>
+            末尾を再生位置まで短縮
+          </button>
+          <span className="trim-start-reason" id={endReasonId}>{endReason ?? "先頭と合成時間を維持し、末尾だけ短縮します。"}</span>
         </span>
         <button type="button" onClick={undoEdit} disabled={!canUndoEdit} title="Undo (Ctrl+Z)">
           ↶
@@ -167,7 +188,7 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
               onChange={(e) => setSampleRateHz(e.target.value)}
             />
           </label>
-          <details className="restore-rate-details"><RestoreInputAudioSummary editor={editor} /><RestoreInputAudio editor={editor} /></details>
+          <details className="restore-rate-details" ref={restoreDetailsRef}><RestoreInputAudioSummary editor={editor} /><RestoreInputAudio editor={editor} /></details>
         </div>
         <button type="button" className="primary" onClick={() => void exportComposition()} disabled={Boolean(busy)} title="全体書き出し (Ctrl+E)">
           書き出し
