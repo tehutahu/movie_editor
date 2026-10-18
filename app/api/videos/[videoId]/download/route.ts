@@ -1,3 +1,4 @@
+import { contentDispositionAttachment } from "@/lib/contentDisposition";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import {
@@ -11,11 +12,6 @@ import { assertUploadFileBelongsToVideo } from "@/lib/pathGuard";
 import { assertStorageId } from "@/lib/validation";
 
 export const runtime = "nodejs";
-
-function contentDispositionAttachment(name: string): string {
-  const safeAscii = name.replace(/[\r\n"]/g, "_");
-  return `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
-}
 
 function resolveUploadDownloadName(
   req: Request,

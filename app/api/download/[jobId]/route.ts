@@ -1,4 +1,5 @@
 import path from "node:path";
+import { contentDispositionAttachment } from "@/lib/contentDisposition";
 import { parseDownloadFilenameParam } from "@/lib/exportName";
 import { getJobRecord } from "@/lib/jobs";
 import { buildFileStreamResponse } from "@/lib/fileStream";
@@ -6,11 +7,6 @@ import { assertJobOutputFile } from "@/lib/pathGuard";
 import { assertStorageId } from "@/lib/validation";
 
 export const runtime = "nodejs";
-
-function contentDispositionAttachment(name: string): string {
-  const safeAscii = name.replace(/[\r\n"]/g, "_");
-  return `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
-}
 
 export async function GET(
   req: Request,
