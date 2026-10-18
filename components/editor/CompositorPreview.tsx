@@ -51,6 +51,7 @@ const EDITOR_HELP_ITEMS = [
   { keys: "音声フェード → 適用 / Enter", desc: "単一動画のイン・アウト秒数を設定。解除で元音量、素材DLは元音声" },
   { keys: "Space", desc: "再生 / 一時停止" },
   { keys: "← / →", desc: "1フレーム戻る / 進む" },
+  { keys: "Shift+← / Shift+→", desc: "前 / 次のクリップ境界へ移動して停止（長押しは1回）" },
   { keys: "Ctrl+← / Ctrl+→", desc: "先頭 / 末尾へ移動" },
 ] as const;
 
@@ -316,6 +317,24 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     [setPlayheadSec],
   );
 
+  const jumpBoundary = useCallback((direction: "previous" | "next") => {
+    const current = editor.getClipBoundaryNavigationState(direction);
+    if (current.blocked || current.target === undefined) return;
+    // Synchronous stop intent only. The store recomputes from the adopted latest
+    // project; do not write this event's absolute target into the playhead ref.
+    if (playRafRef.current !== null) cancelAnimationFrame(playRafRef.current);
+    playRafRef.current = null;
+    lastTickRef.current = null;
+    isPlayingRef.current = false;
+    fadeTimelineRef.current = null;
+    ++fadePlayIntent.current;
+    fadePreparing.current = false;
+    fadeOwnerRef.current?.pause();
+    audioVideoRef.current?.pause();
+    setIsPlaying(false);
+    editor.jumpClipBoundary(direction, current.epoch);
+  }, [editor.getClipBoundaryNavigationState, editor.jumpClipBoundary, audioVideoRef]);
+
   useEffect(() => {
     if (!helpOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -344,6 +363,13 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
       const mod = e.ctrlKey || e.metaKey;
 
+      if (e.shiftKey && !mod && !e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+        e.preventDefault();
+        if (!e.repeat) jumpBoundary(e.key === "ArrowLeft" ? "previous" : "next");
+        return;
+      }
+
       if (e.key === " " || e.code === "Space") {
         e.preventDefault();
         togglePlay();
@@ -366,7 +392,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [areEditorShortcutsBlocked, seekStart, stepBack, stepForward, seekEnd, togglePlay]);
+  }, [areEditorShortcutsBlocked, seekStart, stepBack, stepForward, seekEnd, togglePlay, jumpBoundary]);
 
   useEffect(() => () => clearHideControlsTimer(), [clearHideControlsTimer]);
 
