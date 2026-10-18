@@ -15,11 +15,14 @@ vi.mock("react",()=>({
 }));
 vi.mock("@/hooks/useRestoreInputAudio",()=>({useRestoreInputAudio:()=>({manualEdit:vi.fn()})}));
 vi.mock("@/hooks/useProjectPersistence",()=>({useProjectPersistence:()=>({locked:harness.locked})}));
+// Native capture/effect ownership is tested by browser regressions, not this
+// queued-command harness. Keep its injected history cell independent of that hook.
+vi.mock("@/hooks/useMoveToPlayheadCapture",()=>({useMoveToPlayheadCapture:()=>({active:false,isActive:()=>false})}));
 import { useEditorStore } from "./useEditorStore";
 function render(){harness.cursor=0;return useEditorStore();}
 function setup(){
  render();const p=createEmptyProject();p.tracks=[{id:"t",order:0}];p.clips=[1,3].map((timelineStartSec,i)=>({id:`c${i}`,trackId:"t",timelineStartSec,durationSec:1,parts:[{assetId:"a",sourceInSec:0,sourceOutSec:1}],transform:{x:.5,y:.5,scale:1}}));p.assets=[{id:"a",kind:"video",ext:"mp4",streamUrl:"/a",displayName:"a",sourceDurationSec:4}];p.selectedClipIds=["c0","c1"];
- harness.cells[0].value=createCommandHistory(p);return render();
+ harness.cells[0].value=createCommandHistory(p);const editor=render();expect(editor.project.clips).toHaveLength(2);return editor;
 }
 beforeEach(()=>{harness.cells=[];harness.cursor=0;harness.locked=false;});
 it("queued selection change rejects a stale gain callback atomically",()=>{

@@ -2,6 +2,7 @@
 import { ClipAudioControl } from "./ClipAudioControl";
 import { RestoreInputAudio, RestoreInputAudioSummary } from "./RestoreInputAudio";
 import { useRestorePopupPlacement } from "@/hooks/useRestorePopupPlacement";
+import { planMoveSelectionToPlayhead } from "@/lib/editor/moveSelectionToPlayhead";
 
 import { groupMoveSnapshot, matchesGroupMoveSnapshot, resolveGroupMove, type GroupMoveSnapshot, type GroupMovePlan } from "@/lib/editor/moveClips";
 import { trimEndReason, trimEndSnapshot } from "@/lib/editor/trimClipEnd";
@@ -72,6 +73,10 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
   useRestorePopupPlacement(toolbarRef, restoreDetailsRef, editor.projectEpoch);
   const trimReasonId = useId();
   const endReasonId = useId();
+  const moveReasonId = useId();
+  const moveReason = editor.areEditorShortcutsBlocked() ? "処理やヘルプを閉じてから操作してください。"
+    : editor.moveToPlayheadCaptureActive ? "ドラッグ操作が終わってから移動してください。"
+    : planMoveSelectionToPlayhead(project).reason;
   const endSnapshot = trimEndSnapshot(project, editor.projectEpoch);
   const endReason = busy || editor.persistence.locked ? "処理が終わってから操作してください。" : trimEndReason(project);
   const trimSnapshot = trimStartSnapshot(project, editor.projectEpoch);
@@ -108,6 +113,20 @@ export function TimelineToolbar({ editor }: { editor: EditorStore }) {
             末尾を再生位置まで短縮
           </button>
           <span className="trim-start-reason" id={endReasonId}>{endReason ?? "先頭と合成時間を維持し、末尾だけ短縮します。"}</span>
+        </span>
+        <span className="trim-start-action">
+          <button type="button" data-move-to-playhead aria-disabled={Boolean(moveReason)} aria-describedby={moveReasonId}
+            aria-label="選択群の先頭を再生位置へ移動（間隔とトラックを維持）"
+            title="選択群の先頭を再生位置へ移動（間隔とトラックを維持）"
+            onPointerDown={event => event.stopPropagation()}
+            onKeyDown={event => {
+              if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+              if (event.nativeEvent.isComposing || event.keyCode === 229) event.preventDefault();
+            }}
+            onClick={editor.moveSelectionToPlayhead}>
+            再生位置へ
+          </button>
+          <span className="trim-start-reason" id={moveReasonId}>{moveReason ?? "選択群の間隔とトラックを維持して移動します。再生を止め、位置を指定してから操作してください。"}</span>
         </span>
         <button type="button" onClick={undoEdit} disabled={!canUndoEdit} title="Undo (Ctrl+Z)">
           ↶

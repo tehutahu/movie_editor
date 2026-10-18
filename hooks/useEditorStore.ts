@@ -10,6 +10,8 @@ import { matchesClipAudioSnapshot, mergedAudioGain, type ClipAudioSnapshot } fro
 import { matchesGroupMoveSnapshot, type GroupMoveSnapshot } from "@/lib/editor/moveClips";
 import { applyExactSeek } from "@/lib/editor/exactSeek";
 import { applyClipBoundaryNavigation, clipBoundaryTarget, type ClipBoundaryDirection } from "@/lib/editor/clipBoundaryNavigation";
+import { applyMoveSelectionToPlayhead, moveToPlayheadSnapshot } from "@/lib/editor/moveSelectionToPlayhead";
+import { useMoveToPlayheadCapture } from "@/hooks/useMoveToPlayheadCapture";
 import {
   useCallback,
   useEffect,
@@ -90,6 +92,7 @@ async function pollJobUntil(
 }
 
 export function useEditorStore() {
+  const moveToPlayheadCapture = useMoveToPlayheadCapture();
   const [history, setHistory] = useState<CommandHistory>(() =>
     createCommandHistory(createEmptyProject()),
   );
@@ -515,6 +518,13 @@ export function useEditorStore() {
       return dispatchCommand(h, { type: "moveMany", clipIds: snapshot.clipIds, deltaSec })?.history ?? h;
     });
   }, [areEditorShortcutsBlocked]);
+
+  const moveSelectionToPlayhead = useCallback(() => {
+    if (areEditorShortcutsBlocked() || moveToPlayheadCapture.isActive()) return;
+    const snapshot = moveToPlayheadSnapshot(latestHistoryRef.current, projectEpochRef.current);
+    setHistory(current => applyMoveSelectionToPlayhead(current, snapshot, projectEpochRef.current,
+      areEditorShortcutsBlocked(), moveToPlayheadCapture.isActive()));
+  }, [areEditorShortcutsBlocked, moveToPlayheadCapture.isActive]);
 
   const setSelectedAudioGain = useCallback((snapshot: ClipAudioSnapshot, gain: number) => {
     if (areEditorShortcutsBlocked()) return;
@@ -986,6 +996,7 @@ export function useEditorStore() {
 
   return {
     persistence, projectEpoch, getPreviewSeekState, setExactPlayheadSec, getClipBoundaryNavigationState, jumpClipBoundary, areEditorShortcutsBlocked,
+    moveSelectionToPlayhead, moveToPlayheadCaptureActive: moveToPlayheadCapture.active,
     project,
     busy,
     error,

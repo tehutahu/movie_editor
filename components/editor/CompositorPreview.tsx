@@ -52,6 +52,7 @@ const EDITOR_HELP_ITEMS = [
   { keys: "Space", desc: "再生 / 一時停止" },
   { keys: "← / →", desc: "1フレーム戻る / 進む" },
   { keys: "Shift+← / Shift+→", desc: "前 / 次のクリップ境界へ移動して停止（長押しは1回）" },
+  { keys: "2個以上選択 → 再生位置へ", desc: "群の最早始端を指定位置へ移動。間隔・トラックを維持。再生を止めて位置を指定してから操作" },
   { keys: "Ctrl+← / Ctrl+→", desc: "先頭 / 末尾へ移動" },
 ] as const;
 
