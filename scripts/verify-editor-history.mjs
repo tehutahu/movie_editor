@@ -56,13 +56,24 @@ let page;
     assert.equal(await page.locator('.timeline-clip').count(), 1);
     const initialWidth = await page.locator('.timeline-clip').evaluate(e => parseFloat(e.style.width));
     const persistenceBefore = await page.locator('.project-persistence').innerText();
+    const resizeGestures = [];
     const dragEnd = async (delta, returnToStart = false) => {
-        const handle = await page.locator('.timeline-clip-resize').boundingBox();
+        const target = page.locator('.timeline-clip-resize');
+        await target.scrollIntoViewIfNeeded();
+        const handle = await target.boundingBox();
+        assert(handle, 'resize handle has layout bounds');
         const x = handle.x + handle.width / 2, y = handle.y + handle.height / 2;
+        const viewport = page.viewportSize();
+        assert(x > 0 && x < viewport.width && y > 0 && y < viewport.height, 'resize handle centre is inside viewport');
+        assert(await target.evaluate((el, { x, y }) => document.elementFromPoint(x, y) === el, { x, y }), 'real pointer reaches the resize handle');
+        const before = { width: await page.locator('.timeline-clip').evaluate(e => e.style.width), redo: await redo.isEnabled() };
         await page.mouse.move(x, y); await page.mouse.down();
         if (delta) await page.mouse.move(x + delta, y, { steps: 5 });
         if (returnToStart) await page.mouse.move(x, y, { steps: 5 });
         await page.mouse.up();
+        const after = { width: await page.locator('.timeline-clip').evaluate(e => e.style.width), redo: await redo.isEnabled() };
+        resizeGestures.push({ delta, returnToStart, handle, viewport, before, after });
+        fs.writeFileSync(evidence + '/resize-gestures.json', JSON.stringify(resizeGestures, null, 2));
     };
     await dragEnd(80);
     check('source-end clamped resize preserves clip length and pending Redo',
