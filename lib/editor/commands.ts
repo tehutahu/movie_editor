@@ -3,6 +3,7 @@ import { addTitle, updateTitle } from "./title";
 import { isMediaClip } from "./types";
 import { setClipAudioGain } from "@/lib/editor/clipAudio";
 import { moveClips } from "@/lib/editor/moveClips";
+import { trimClipEnd, trimEndReason } from "@/lib/editor/trimClipEnd";
 import { trimClipStart, trimStartReason } from "@/lib/editor/trimClipStart";
 import { addAssetAtPlayhead } from "@/lib/editor/addAssetAtPlayhead";
 import { applySpeedRestoreToProject } from "@/lib/editor/applySpeedRestore";
@@ -24,6 +25,7 @@ export type EditorCommand =
   | { type: "clearAudioFade"; clipId: string }
   | { type: "addTitle"; id: string; text: string }
   | { type: "titleText"; clipId: string; text: string }
+  | { type: "trimEnd"; clipId: string; atSec: number }
   | { type: "trimStart"; clipId: string; atSec: number }
   | { type: "split"; clipId: string; atSec: number }
   | { type: "merge"; clipIds: string[] }
@@ -58,6 +60,11 @@ export function applyCommand(
     case "clearAudioFade": return clearClipAudioFade(project, command.clipId);
     case "addTitle": return addTitle(project, command.id, command.text);
     case "titleText": return updateTitle(project, command.clipId, command.text);
+    case "trimEnd": {
+      if (project.selectedClipIds.length !== 1 || project.selectedClipIds[0] !== command.clipId ||
+          trimEndReason({ ...project, playheadSec: command.atSec }, false)) return null;
+      return trimClipEnd(project, command.clipId, command.atSec);
+    }
     case "trimStart": {
       if (project.selectedClipIds.length !== 1 || project.selectedClipIds[0] !== command.clipId ||
           trimStartReason({ ...project, playheadSec: command.atSec }, false)) return null;
