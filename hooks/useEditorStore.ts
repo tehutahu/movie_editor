@@ -12,6 +12,7 @@ import { applyExactSeek } from "@/lib/editor/exactSeek";
 import { applyClipBoundaryNavigation, clipBoundaryTarget, type ClipBoundaryDirection } from "@/lib/editor/clipBoundaryNavigation";
 import { applyMoveSelectionToPlayhead, moveToPlayheadSnapshot } from "@/lib/editor/moveSelectionToPlayhead";
 import { applyContentDuration, contentDurationSnapshot } from "@/lib/editor/contentDuration";
+import { applySelectAllClips } from "@/lib/editor/selectAllClips";
 import { useMoveToPlayheadCapture } from "@/hooks/useMoveToPlayheadCapture";
 import {
   useCallback,
@@ -322,6 +323,13 @@ export function useEditorStore() {
       return updateEditorView(h, { selectedClipIds: selected });
     });
   }, []);
+
+  const selectAllClips = useCallback(() => {
+    if (areEditorShortcutsBlocked() || moveToPlayheadCapture.isActive()) return;
+    const epoch = projectEpochRef.current;
+    setHistory(current => applySelectAllClips(current, epoch, projectEpochRef.current,
+      areEditorShortcutsBlocked() || moveToPlayheadCapture.isActive()));
+  }, [areEditorShortcutsBlocked, moveToPlayheadCapture.isActive]);
 
   const clearSelection = useCallback(() => {
     setHistory((h) => {
@@ -939,6 +947,18 @@ export function useEditorStore() {
     }
 
     function onKeyDown(e: KeyboardEvent) {
+      // Only the new A chord gains these guards; existing shortcut policies stay unchanged.
+      if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+        const target = e.target;
+        const editableAncestor = target instanceof Element &&
+          (isEditableTarget(target) || Boolean(target.closest("input, textarea, select")) ||
+            Boolean(target.closest('[contenteditable]:not([contenteditable="false"])')));
+        if (e.shiftKey || e.altKey || e.defaultPrevented || e.isComposing || e.keyCode === 229 ||
+            editableAncestor || areEditorShortcutsBlocked() || moveToPlayheadCapture.isActive()) return;
+        e.preventDefault();
+        if (!e.repeat) selectAllClips();
+        return;
+      }
       if (areEditorShortcutsBlocked()) return;
       if (isEditableTarget(e.target)) return;
 
@@ -991,6 +1011,7 @@ export function useEditorStore() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     areEditorShortcutsBlocked,
+    selectAllClips,
     addTrack,
     deleteSelected,
     duplicateSelected,
@@ -1004,7 +1025,7 @@ export function useEditorStore() {
 
   return {
     persistence, projectEpoch, getPreviewSeekState, setExactPlayheadSec, getClipBoundaryNavigationState, jumpClipBoundary, areEditorShortcutsBlocked,
-    fitContentDuration, moveSelectionToPlayhead, moveToPlayheadCaptureActive: moveToPlayheadCapture.active,
+    selectAllClips, fitContentDuration, moveSelectionToPlayhead, moveToPlayheadCaptureActive: moveToPlayheadCapture.active,
     project,
     busy,
     error,
