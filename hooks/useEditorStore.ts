@@ -9,6 +9,7 @@ import { useRestoreInputAudio } from "@/hooks/useRestoreInputAudio";
 import { matchesClipAudioSnapshot, mergedAudioGain, type ClipAudioSnapshot } from "@/lib/editor/clipAudio";
 import { matchesGroupMoveSnapshot, type GroupMoveSnapshot } from "@/lib/editor/moveClips";
 import { applyExactSeek } from "@/lib/editor/exactSeek";
+import { applyClipBoundaryNavigation, clipBoundaryTarget, type ClipBoundaryDirection } from "@/lib/editor/clipBoundaryNavigation";
 import {
   useCallback,
   useEffect,
@@ -275,6 +276,17 @@ export function useEditorStore() {
 
   const setExactPlayheadSec = useCallback((target: number, expectedEpoch: number) => {
     setHistory(current => applyExactSeek(current, target, expectedEpoch,
+      projectEpochRef.current, areEditorShortcutsBlocked()));
+  }, [areEditorShortcutsBlocked]);
+
+  const getClipBoundaryNavigationState = useCallback((direction: ClipBoundaryDirection) => ({
+    epoch: projectEpochRef.current,
+    blocked: areEditorShortcutsBlocked(),
+    target: clipBoundaryTarget(latestProjectRef.current, direction),
+  }), [areEditorShortcutsBlocked]);
+
+  const jumpClipBoundary = useCallback((direction: ClipBoundaryDirection, expectedEpoch: number) => {
+    setHistory(current => applyClipBoundaryNavigation(current, direction, expectedEpoch,
       projectEpochRef.current, areEditorShortcutsBlocked()));
   }, [areEditorShortcutsBlocked]);
 
@@ -973,7 +985,7 @@ export function useEditorStore() {
   ]);
 
   return {
-    persistence, projectEpoch, getPreviewSeekState, setExactPlayheadSec, areEditorShortcutsBlocked,
+    persistence, projectEpoch, getPreviewSeekState, setExactPlayheadSec, getClipBoundaryNavigationState, jumpClipBoundary, areEditorShortcutsBlocked,
     project,
     busy,
     error,
