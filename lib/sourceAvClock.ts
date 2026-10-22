@@ -68,7 +68,9 @@ export function incompleteSourceAvSegment(raw: FfProbeJson, duration: number): b
 const num = (n: number) => String(Number(n.toFixed(9)));
 // Below ffmpeg's signed-int denominator limit and divisible by 30, so the
 // output cadence is exact while source cuts retain sub-microsecond precision.
-const VIDEO_CLOCK_DEN = 1_920_000_000;
+// ffmpeg 6.1 converts settb=1/1920000000 to 1/1919999999, breaking the
+// cadence. 30e6 survives that conversion exactly and resolves our ±1µs cuts.
+const VIDEO_CLOCK_DEN = 30_000_000;
 /** Same positive decimal -> microsecond truncation -> nearest 48k sample as
  * ffmpeg's output seek. Integer arithmetic avoids binary boundary drift. */
 export function sourceAudioSample(start: number): number {

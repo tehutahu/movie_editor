@@ -42,7 +42,7 @@ ffmpeg -ss 0.1 -i input.mp4 -t 0.6 -c:v libx264 -c:a aac old.mp4
 - video正原点、audio／format原点0、各1streamという既存条件を維持。
 - r_frame_rate=30/1、平均15〜30fpsは候補gate。全packetのPTSとdurationの組を整列し、30Hzの1／2tick、起点一致、全隣接区間の厳密連続性、実平均rate一致を証明する。
 - EOFは最終PTS＋durationから計算。count/30をVFRへ適用しない。holes、重複、overlap、格子外、3tick、未知、診断予算超過は旧bytesを保持する。
-- 候補だけ高精度かつ30で割切れるtime baseを使う。1e9は30で割切れずsource1/30で1frame遅延、AVTBは1/30−1µsで1frame早送りする反例があった。1/1920000000と安全整数PTS範囲で検証する。ns境界の保証はしない。
+- 候補だけ高精度かつ30で割切れるtime baseを使う。1e9は30で割切れずsource1/30で1frame遅延、AVTBは1/30−1µsで1frame早送りする反例があった。1/1920000000もffmpeg6.1のsettbで実際には1/1919999999へ変換され、fps round=upで1frame遅延した。6.1／7.1／同梱7.0で確認する1/30000000と安全整数PTS範囲に限定する。ns境界の保証はしない。
 - 正常な旧出力・元媒体・保存source値・Undo/Redoは保持。既存containの入力tick未満の精度、負原点、別原点組合せ、一般VFRは残件。
 
 自動回帰は`lib/sourceAvClock.regression.test.ts`と`lib/sourceAvClock.test.ts`。system／bundled両方で、source0／.1／1/30、0.5秒および1/30秒境界±1µsの固定色とfull-f32-decode byte slice＋AAC encodeのdecoded PCM全byteを比較する。ブラウザ回帰は`verify-divergent-av-clock.mjs`でCFR/VFRのpreview・selected・stretch・contain、保存／Redoを実操作する。

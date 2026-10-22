@@ -33,8 +33,17 @@ function rms(pcm: Buffer, a: number, b: number) {
   let sum = 0; for (let n = Math.round(a * 48000); n < Math.round(b * 48000); n++) sum += pcm.readInt16LE(n * 2) ** 2;
   return Math.sqrt(sum / Math.round((b - a) * 48000));
 }
-function oracle(file: string, shift: number) {
+function oracle(file: string, shift: number, duration=.7) {
   ff(["-xerror", "-i", file, "-f", "null", "-"]);
+  // Decode every frame without seeking: distinguish a product cadence error
+  // (including ffmpeg 6.1 settb quantization) from decoder seek behavior.
+  const frames = ff(["-i", file, "-vf", "scale=1:1", "-fps_mode", "passthrough", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"]);
+  expect(frames.length).toBe(Math.ceil(duration * 30) * 3);
+  for (let i=0; i<frames.length/3; i++) {
+    const channel = shift+i/30 < .5-1e-9 ? 0 : 2;
+    expect(frames[i*3+channel], `frame ${i}, source ${shift+i/30}`).toBeGreaterThan(220);
+    expect(frames[i*3+(channel===0?2:0)]).toBeLessThan(25);
+  }
   const pcm = ff(["-i", file, "-vn", "-ac", "1", "-ar", "48000", "-f", "s16le", "pipe:1"]);
   expect(rms(pcm, .502 - shift, .518 - shift)).toBeGreaterThan(4000);
   expect(rms(pcm, .3 - shift, .32 - shift)).toBeLessThan(1500);
@@ -103,6 +112,6 @@ it.skipIf(!real).each([[false,false],[true,false],[false,true],[true,true]])("st
   p.clips = [clip]; const before = JSON.stringify(p);
   const jobDir = path.join(dir, `stretch-${multi}-${vfr}`); await mkdir(jobDir);
   const out = path.join(jobDir, "out.mp4"); await exportCompositionToFile({ project: p, jobDir, outputPath: out });
-  oracle(out, .1); expect(JSON.stringify(p)).toBe(before);
+  oracle(out, .1, .6); expect(JSON.stringify(p)).toBe(before);
   expect((await readdir(jobDir)).filter(s => s.endsWith(".mp4"))).toEqual(["out.mp4"]);
 }, 30000);
