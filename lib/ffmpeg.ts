@@ -194,7 +194,7 @@ export function assertAudioFadeAvailable(): Promise<void> {
 
 export type FfProbeJson = {
   format?: { duration?: string; format_name?: string; start_time?: string };
-  streams?: (VideoDisplayStream & { codec_type?: string; codec_name?: string; channels?: number; bits_per_sample?: number; index?: number; sample_rate?: string; start_time?: string; start_pts?: number | string; time_base?: string; duration?: string; duration_ts?: number | string; avg_frame_rate?: string; r_frame_rate?: string; sample_aspect_ratio?: string; nb_frames?: string; tags?: Record<string, string>; side_data_list?: { side_data_type?: string; rotation?: unknown; displaymatrix?: string }[] })[];
+  streams?: (VideoDisplayStream & { codec_type?: string; codec_name?: string; profile?: string; channels?: number; bits_per_sample?: number; index?: number; sample_rate?: string; start_time?: string; start_pts?: number | string; time_base?: string; duration?: string; duration_ts?: number | string; avg_frame_rate?: string; r_frame_rate?: string; sample_aspect_ratio?: string; nb_frames?: string; tags?: Record<string, string>; side_data_list?: { side_data_type?: string; rotation?: unknown; displaymatrix?: string }[] })[];
 };
 
 export async function probeMedia(inputPath: string): Promise<FfProbeJson> {

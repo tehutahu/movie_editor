@@ -35,14 +35,15 @@ async function seek(time, channel) {
     return p[channel] > 220 && p[channel === 0 ? 2 : 0] < 25;
   }, channel);
 }
-function oracle(out, start) {
+function oracle(out, start, positiveAudio=false) {
   ff(['-xerror', '-i', out, '-f', 'null', '-']);
   const pcm = ff(['-i', out, '-vn', '-ac', '1', '-ar', '48000', '-f', 's16le', 'pipe:1']);
   const rms = (a, b) => {
     let sum = 0; for (let n = Math.round(a * 48000); n < Math.round(b * 48000); n++) sum += pcm.readInt16LE(n * 2) ** 2;
     return Math.sqrt(sum / Math.round((b - a) * 48000));
   };
-  assert(rms(.502 - start, .518 - start) > 4000); assert(rms(.3 - start, .32 - start) < 1500);
+  // Positive AAC origin retains its decoded priming; do not fit/remove it.
+  assert(rms((positiveAudio ? .526 : .502) - start, (positiveAudio ? .536 : .518) - start) > 4000); assert(rms(.3 - start, .32 - start) < 1500);
   for (const [t, channel] of [[.3 - start, 0], [.5 - start, 2]]) {
     const rgb = ff(['-ss', String(t), '-i', out, '-frames:v', '1', '-vf', 'crop=iw/2:ih/2,scale=1:1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1']);
     assert.equal(rgb.length, 3); assert(rgb[channel] > 220 && rgb[channel === 0 ? 2 : 0] < 25);
@@ -53,13 +54,14 @@ function oracle(out, start) {
   ff(['-y', '-itsoffset', '2', '-i', `${evidence}/video.mp4`, '-f', 'lavfi', '-i', 'aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*gte(t\\,0.5)*lt(t\\,0.52):s=44100:d=1.4', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', `${evidence}/av.mp4`]);
   ff(['-y','-i',`${evidence}/video.mp4`,'-vf','select=if(lt(t\\,0.5)\\,not(mod(n\\,2))\\,1)','-fps_mode','vfr','-c:v','libx264','-bf','0',`${evidence}/variable-video.mp4`]);
   ff(['-y','-itsoffset','2','-i',`${evidence}/variable-video.mp4`,'-i',`${evidence}/av.mp4`,'-map','0:v:0','-map','1:a:0','-c','copy',`${evidence}/vfr.mp4`]);
+  ff(['-y','-i',`${evidence}/video.mp4`,'-itsoffset','2','-f','lavfi','-i','aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*gte(t\\,0.5)*lt(t\\,0.52):s=48000:d=1.4','-map','0:v:0','-map','1:a:0','-c:v','copy','-c:a','aac',`${evidence}/positive-audio.mp4`]);
   await suite.start(); const browser = await suite.launch(); page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.on('pageerror', e => errors.push(e.message)); await page.goto(baseURL);
-  await page.locator('.asset-library input[type=file]').setInputFiles([`${evidence}/av.mp4`,`${evidence}/vfr.mp4`]);
-  await page.waitForFunction(() => document.querySelectorAll('.asset-card').length===2 && !document.querySelector('.asset-library input').disabled);
+  await page.locator('.asset-library input[type=file]').setInputFiles([`${evidence}/av.mp4`,`${evidence}/vfr.mp4`,`${evidence}/positive-audio.mp4`]);
+  await page.waitForFunction(() => document.querySelectorAll('.asset-card').length===3 && !document.querySelector('.asset-library input').disabled);
   await dragToVisibleTarget(page, page.locator('.asset-card').first(), page.locator('.timeline-track-row').last(), { targetPosition: { x: 48, y: 30 } });
   await page.locator('.timeline-clip').waitFor(); const template = await save();
-  for (const name of ['av','vfr']) for (const start of [0, .1, 1/30]) {
+  for (const name of ['av','vfr','positive-audio']) for (const start of [0, .1, 1/30]) {
     const doc = structuredClone(template); doc.version = 1;
     Object.assign(doc.project, { compositionWidth: 320, compositionHeight: 320, compositionDurationSec: .7 });
     Object.assign(doc.project.clips[0], { timelineStartSec: 0, durationSec: .7, transform: { x: .5, y: .5, scale: 1 } });
@@ -68,7 +70,8 @@ function oracle(out, start) {
     check(`${name} source ${start}: preview uses the fixed red/blue boundary`);
     // Real UI selected download and whole export, including their payloads.
     await page.locator('.timeline-clip').click();
-    for (const mode of ['selected','stretch','contain']) {
+    // Positive audio is export-only; native/fade audio and contain remain open.
+    for (const mode of name==='positive-audio'?['selected','stretch']:['selected','stretch','contain']) {
       const selected=mode==='selected';
       if(mode==='contain'){
         await page.getByRole('combobox',{name:'クリップの配置',exact:true}).selectOption('contain');
@@ -83,7 +86,7 @@ function oracle(out, start) {
       if (selected) { assert.equal(payload.startSec, start); assert.equal(payload.endSec, start + .7); }
       else assert.deepEqual(payload.clips[0].parts, doc.project.clips[0].parts);
       const download = await pending; assert.equal(await download.failure(), null);
-      const out = `${evidence}/${name}-${mode}-${start}.mp4`; await download.saveAs(out); oracle(out, start);
+      const out = `${evidence}/${name}-${mode}-${start}.mp4`; await download.saveAs(out); oracle(out, start,name==='positive-audio');
       await page.waitForFunction(() => !document.querySelector('.busy-banner'));
       check(`${name} source ${start}: native ${mode} download has fixed frame/pulse oracle`);
     }

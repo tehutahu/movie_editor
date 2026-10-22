@@ -3,13 +3,19 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 const fake = vi.hoisted(() => ({ calls: [] as string[][], input: "", output: "", source: {} as unknown,
-  old: {} as unknown, candidate: {} as unknown, packets: {} as unknown, fault: "", signal: undefined as AbortController | undefined }));
+  old: {} as unknown, candidate: {} as unknown, packets: {} as unknown, audioPackets: {} as unknown, prefix:"", fault: "", signal: undefined as AbortController | undefined }));
 vi.mock("./containAudioRepair", async original => {
   const actual = await original<typeof import("./containAudioRepair")>();
   return { ...actual, runBoundedAudioAux: async (_command: string, args: string[], options: {signal?: AbortSignal}) => {
     fake.calls.push(args); if (options.signal?.aborted) throw new actual.AudioAuxAbort();
     const file = args.at(-1)!;
-    if (args.includes("-show_packets")) return JSON.stringify(fake.packets);
+    if (args.includes("-show_packets")) return JSON.stringify(args.includes("a:0") ? fake.audioPackets : fake.packets);
+    if (args.some(s=>s.includes("astats="))) {
+      if(fake.fault==="prefix-timeout")throw Error("decoded prefix timeout");
+      if(fake.fault==="prefix-abort"){fake.signal!.abort();throw new actual.AudioAuxAbort();}
+      if(fake.fault==="prefix-changed")await writeFile(fake.input,"changed during prefix decode");
+      return fake.prefix;
+    }
     if (args.includes("-show_streams")) {
       if (fake.fault === "probe" && file === fake.output) throw new Error("probe timed out");
       const value = file === fake.input ? fake.source : file === fake.output ? fake.old : fake.candidate;
@@ -35,7 +41,7 @@ const complete = () => ({ streams: [ {codec_type:"video",start_time:"0",duration
 beforeEach(async () => {
   dir = await mkdtemp(path.join(tmpdir(), "av-clock-flow-")); fake.input = path.join(dir,"input.mp4"); fake.output=path.join(dir,"out.mp4");
   await writeFile(fake.input,"immutable source"); await writeFile(fake.output,"old output");
-  fake.source=raw(); fake.old={streams:[]};fake.candidate=complete();fake.fault="";fake.calls=[];fake.signal=undefined;
+  fake.source=raw(); fake.old={streams:[]};fake.candidate=complete();fake.fault="";fake.calls=[];fake.signal=undefined;fake.audioPackets={};fake.prefix="";
   fake.packets={packets:Array.from({length:60},(_,i)=>({pts:30720+i*512,duration:512}))};
 });
 afterEach(async () => { await rm(dir,{recursive:true,force:true}); });
@@ -143,4 +149,42 @@ it("proven missing video with unknown source becomes an explicit error and remov
   fake.source={};fake.old={streams:[]};
   await expect(extractEditorSegment({inputPath:fake.input,outputPath:fake.output,startSec:.1,endSec:.7})).rejects.toThrow("映像");
   expect(await readdir(dir)).toEqual(["input.mp4"]);
+});
+
+function positiveAudio() {
+  const r=raw();r.format={start_time:"0.000000",format_name:"mov,mp4,m4a,3gp,3g2,mj2"};
+  Object.assign(r.streams![0],{codec_name:"h264",start_time:"0.000000",start_pts:0});
+  Object.assign(r.streams![1],{codec_name:"aac",profile:"LC",channels:1,sample_rate:"48000",time_base:"1/48000",start_time:"1.978000",start_pts:94944,duration:"4.000000",duration_ts:192000});
+  fake.source=r;fake.old={streams:[{codec_type:"video",start_time:"0",duration:"0.6"}]};
+  fake.packets={packets:Array.from({length:60},(_,i)=>({pts:i*512,duration:512}))};
+  fake.audioPackets={packets:Array.from({length:95},(_,i)=>({pts:94944+i*1024,duration:i===94?768:1024}))};
+  fake.prefix="frame:0 pts:0 pts_time:0\nlavfi.astats.Overall.Number_of_samples=33600.000000\n";
+}
+it("repairs proven positive-audio loss only after packet EOF and real decoded prefix coverage", async()=>{
+  positiveAudio();expect(await repairSourceAvSegment(params())).toBe(true);
+  expect((await readFile(fake.output)).toString()).toBe("candidate");
+  expect(fake.calls.filter(c=>c.includes("-show_packets"))).toHaveLength(2);
+  expect(fake.calls.find(c=>c.some(s=>s.includes("astats=")))?.includes("-xerror")).toBe(true);
+  expect(fake.calls.find(c=>c.includes("-filter_complex"))?.join(" ")).toContain("atrim=start_sample=4800:end_sample=33600");
+  expect((await readdir(dir)).sort()).toEqual(["input.mp4","out.mp4"]);
+});
+it.each(["packet-short","packet-skip","prefix-short","prefix-timeout","prefix-changed"])("positive audio %s preserves old bytes without publishing padding",async fault=>{
+  positiveAudio();
+  if(fault==="packet-short")fake.audioPackets={packets:[{pts:94944,duration:1024}]};
+  if(fault==="packet-skip")fake.audioPackets={packets:[{pts:94944,duration:1024,side_data_list:[{side_data_type:"Skip Samples"}]}]};
+  if(fault==="prefix-short")fake.prefix=fake.prefix.replace("33600","33599");
+  fake.fault=fault;expect(await repairSourceAvSegment(params())).toBe(false);
+  expect((await readFile(fake.output)).toString()).toBe("old output");
+  expect(fake.calls.filter(c=>c.includes("-filter_complex"))).toHaveLength(0);
+  expect((await readdir(dir)).sort()).toEqual(["input.mp4","out.mp4"]);
+});
+it("positive audio prefix abort propagates without touching old output",async()=>{
+  positiveAudio();fake.signal=new AbortController();fake.fault="prefix-abort";
+  await expect(repairSourceAvSegment({...params(),signal:fake.signal.signal})).rejects.toThrow();
+  expect((await readFile(fake.output)).toString()).toBe("old output");
+});
+it("healthy positive-audio output does not decode or replace anything",async()=>{
+  positiveAudio();fake.old=complete();expect(await repairSourceAvSegment(params())).toBe(false);
+  expect(fake.calls.some(c=>c.includes("-show_packets")||c.some(s=>s.includes("astats=")))).toBe(false);
+  expect((await readFile(fake.output)).toString()).toBe("old output");
 });

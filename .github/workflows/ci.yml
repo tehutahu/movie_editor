@@ -67,7 +67,7 @@ jobs:
         env:
           FFMPEG_PATH: ""
           FFPROBE_PATH: ""
-        run: npx vitest run lib/sourceAvClock.regression.test.ts
+        run: npx vitest run lib/sourceAvClock.regression.test.ts lib/positiveAudioClock.regression.test.ts
 
       - name: Audio fade regressions with the bundled encoder and probe
         env:
