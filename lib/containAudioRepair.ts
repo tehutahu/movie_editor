@@ -9,6 +9,8 @@ import { resolveFfmpegPath, resolveFfprobePath, type FfProbeJson } from "./ffmpe
 type Rational = { n: bigint; d: bigint };
 const mul = (a: Rational, b: Rational): Rational => ({ n: a.n * b.n, d: a.d * b.d });
 const sub = (a: Rational, b: Rational): Rational => ({ n: a.n * b.d - b.n * a.d, d: a.d * b.d });
+const add = (a: Rational, b: Rational): Rational => ({ n: a.n * b.d + b.n * a.d, d: a.d * b.d });
+const ceilMicros = (a: Rational): Rational => ({ n: (a.n * BigInt(1_000_000) + a.d - BigInt(1)) / a.d, d: BigInt(1_000_000) });
 const compare = (a: Rational, b: Rational) => a.n * b.d - b.n * a.d;
 const abs = (a: Rational): Rational => ({ n: a.n < BigInt(0) ? -a.n : a.n, d: a.d });
 function integer(value: unknown): bigint | null {
@@ -206,12 +208,19 @@ export async function inspectContainWav(file: string, signal?: AbortSignal): Pro
 }
 
 export type AudioRepairResult = { file: string; status: "ineligible" | "unknown" | "healthy" | "fallback" | "repaired"; oldSamples?: bigint; newSamples?: bigint };
-async function repairContainAudioInternal(params: { input: string; sourceIn: number; durationArg: string; descriptor: ContainAudioSeek | null; oldFile: string; retryFile: string; signal?: AbortSignal }): Promise<AudioRepairResult> {
+async function repairContainAudioInternal(params: { input: string; sourceIn: number; sourceInArg?: string; durationArg: string; descriptor: ContainAudioSeek | null; oldFile: string; retryFile: string; signal?: AbortSignal }): Promise<AudioRepairResult> {
   const { input, sourceIn, durationArg, descriptor, oldFile, retryFile, signal } = params;
   const original = (status: AudioRepairResult["status"], oldSamples?: bigint): AudioRepairResult => ({ file: oldFile, status, oldSamples });
   if (signal?.aborted) throw new AudioAuxAbort();
   const range = containAudioSampleRange(durationArg);
-  if (sourceIn !== 0 || !descriptor || !range || range.low === BigInt(0) || compare(descriptor.audioDuration, range.duration) < BigInt(0)) return original("ineligible");
+  // Nonzero cuts reuse the original renderer's nine-decimal argument. Allow
+  // for ffmpeg's microsecond parse quantization conservatively at both endpoints.
+  const startArg = params.sourceInArg ?? (sourceIn === 0 ? "0" : undefined);
+  const start = startArg !== undefined && /^\d+(?:\.\d{1,9})?$/.test(startArg) ? decimal(startArg) : null;
+  if (!Number.isFinite(sourceIn) || sourceIn < 0 || !start ||
+      Number(startArg) !== Number(sourceIn.toFixed(9)) ||
+      !descriptor || !range || range.low === BigInt(0) ||
+      compare(descriptor.audioDuration, start.n === BigInt(0) ? range.duration : add(ceilMicros(start), ceilMicros(range.duration))) < BigInt(0)) return original("ineligible");
   if (!descriptor.inputIdentity || descriptor.inputIdentity.file !== input || !await sameContainAudioInput(descriptor.inputIdentity)) return original("ineligible");
   if (signal?.aborted) throw new AudioAuxAbort();
   const oldSamples = await inspectContainWav(oldFile, signal);
@@ -222,7 +231,9 @@ async function repairContainAudioInternal(params: { input: string; sourceIn: num
   if (signal?.aborted) throw new AudioAuxAbort();
   let accepted = false;
   try {
-    await runBoundedAudioAux(resolveFfmpegPath(), ["-y", "-i", input, "-vn", "-af", "aresample=48000,apad", "-ac", "2", "-ar", "48000", "-t", durationArg, "-c:a", "pcm_s16le", retryFile], { timeoutMs: CONTAIN_AUDIO_AUX_BUDGET.retryMs, signal });
+    await runBoundedAudioAux(resolveFfmpegPath(), ["-y", "-i", input,
+      ...(start.n > BigInt(0) ? ["-ss", startArg!] : []),
+      "-vn", "-af", "aresample=48000,apad", "-ac", "2", "-ar", "48000", "-t", durationArg, "-c:a", "pcm_s16le", retryFile], { timeoutMs: CONTAIN_AUDIO_AUX_BUDGET.retryMs, signal });
     const newSamples = await inspectContainWav(retryFile, signal);
     if (signal?.aborted) throw new AudioAuxAbort();
     if (!await sameContainAudioInput(descriptor.inputIdentity)) return original("fallback", oldSamples);

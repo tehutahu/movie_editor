@@ -28,12 +28,46 @@ it("healthy WAV including threshold L keeps exact old path/bytes and never retri
 it("clear short uses a separate path once, retains original bytes and only removes -ss 0",async()=>{
  const p=await setup();const before=await readFile(p.oldFile);expect(await repairContainAudio(p)).toMatchObject({file:p.retryFile,status:"repaired",oldSamples:BigInt(1098),newSamples:BigInt(67200)});expect(await readFile(p.oldFile)).toEqual(before);const list=await calls();expect(list.map(c=>c.kind)).toEqual(["probe","ff","probe"]);expect(list[1].args).toEqual(["-y","-i",p.input,"-vn","-af","aresample=48000,apad","-ac","2","-ar","48000","-t","1.4","-c:a","pcm_s16le",p.retryFile]);
 });
+it("a trimmed short WAV retries once with the shared seek argument after input",async()=>{
+ const p={...await setup({newN:14400}),sourceIn:.5,sourceInArg:"0.5",durationArg:"0.3"};
+ const before=await readFile(p.oldFile);expect(await repairContainAudio(p)).toMatchObject({file:p.retryFile,status:"repaired",newSamples:BigInt(14400)});
+ expect(await readFile(p.oldFile)).toEqual(before);
+ const list=await calls();expect(list.map(c=>c.kind)).toEqual(["probe","ff","probe"]);
+ expect(list[1].args).toEqual(["-y","-i",p.input,"-ss","0.5","-vn","-af","aresample=48000,apad","-ac","2","-ar","48000","-t","0.3","-c:a","pcm_s16le",p.retryFile]);
+});
+it.each([
+ {sourceIn:-.1,sourceInArg:"0"},{sourceIn:Infinity,sourceInArg:"0"},
+ {sourceIn:.5},{sourceIn:.5,sourceInArg:"0.4"},{sourceIn:.5,sourceInArg:".5"},
+ {sourceIn:.5,sourceInArg:"5e-1"},{sourceIn:.5,sourceInArg:"0.5000000001"},
+ {sourceIn:1.100001,sourceInArg:"1.100001"},
+])("invalid, mismatched or uncovered source range avoids all auxiliary work: %j",async start=>{
+ const p={...await setup({newN:14400}),...start,durationArg:"0.3"};
+ expect(await repairContainAudio(p)).toMatchObject({status:"ineligible",file:p.oldFile});
+ await expect(access(path.join(dir,"calls.jsonl"))).rejects.toThrow();await expect(access(p.retryFile)).rejects.toThrow();
+});
+it("preserves a shared nine-decimal seek string and conservatively rejects sub-microsecond uncovered ends",async()=>{
+ const p={...await setup({newN:14400}),sourceIn:1/30,sourceInArg:"0.033333333",durationArg:"0.3"};
+ expect((await repairContainAudio(p)).status).toBe("repaired");
+ expect((await calls()).find(c=>c.kind==="ff").args).toContain("0.033333333");
+ const limited={...p,descriptor:{...p.descriptor,audioDuration:{n:BigInt(333333333),d:BigInt(1000000000)}}};
+ expect((await repairContainAudio(limited)).status).toBe("ineligible");
+});
+it("exact rational end coverage is eligible and healthy trimmed bytes never change",async()=>{
+ let p={...await setup({newN:14400}),sourceIn:1.1,sourceInArg:"1.1",durationArg:"0.3"};
+ expect((await repairContainAudio(p)).status).toBe("repaired");
+ p={...await setup({oldN:14400,newN:14400}),sourceIn:.5,sourceInArg:"0.5",durationArg:"0.3"};
+ const before=await readFile(p.oldFile);expect(await repairContainAudio(p)).toMatchObject({status:"healthy",file:p.oldFile});expect(await readFile(p.oldFile)).toEqual(before);
+});
+it("failed trimmed retry preserves the old output and cleans its separate candidate",async()=>{
+ const p={...await setup({newN:14400,retryFail:true}),sourceIn:.5,sourceInArg:"0.5",durationArg:"0.3"};
+ const before=await readFile(p.oldFile);expect(await repairContainAudio(p)).toMatchObject({status:"fallback",file:p.oldFile});expect(await readFile(p.oldFile)).toEqual(before);await expect(access(p.retryFile)).rejects.toThrow();
+});
 it.each([{retryFail:true},{newUnknown:true},{newN:67198},{newN:67202},{newN:1098},{newN:0}])("retry failure/unacceptable sample count falls back and removes partial candidate: %j",async config=>{
  const p=await setup(config);const before=await readFile(p.oldFile);expect(await repairContainAudio(p)).toMatchObject({status:"fallback",file:p.oldFile});expect(await readFile(p.oldFile)).toEqual(before);await expect(access(p.retryFile)).rejects.toThrow();expect((await calls()).filter(c=>c.kind==="ff")).toHaveLength(1);
 });
 it("unknown old probe keeps old output without retry",async()=>{const p=await setup({probeFail:true});expect(await repairContainAudio(p)).toMatchObject({status:"unknown",file:p.oldFile});expect((await calls()).map(c=>c.kind)).toEqual(["probe"]);});
-it("caller abort during retry is not resurrected as a successful legacy result and candidate is cleaned",async()=>{
- const p=await setup({hold:true});const signal=new AbortController();const result=repairContainAudio({...p,signal:signal.signal});const rejection=expect(result).rejects.toBeInstanceOf(AudioAuxAbort);
+it.each([0,.5])("caller abort during retry at source %s never resurrects legacy success and cleans the candidate",async sourceIn=>{
+ const p={...await setup({hold:true}),sourceIn,sourceInArg:String(sourceIn),durationArg:sourceIn===0?"1.4":"0.3"};const signal=new AbortController();const result=repairContainAudio({...p,signal:signal.signal});const rejection=expect(result).rejects.toBeInstanceOf(AudioAuxAbort);
  const deadline=Date.now()+2000;while(true){try{await access(p.retryFile);break;}catch{if(Date.now()>deadline)throw new Error("retry never began");await new Promise(r=>setTimeout(r,10));}}
  signal.abort();await rejection;await expect(access(p.retryFile)).rejects.toThrow();expect(await readFile(p.oldFile)).toEqual(Buffer.alloc(1098*4+78,7));
 });
