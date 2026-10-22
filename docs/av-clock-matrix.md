@@ -114,3 +114,25 @@ ffmpeg -i negative.mkv -map 0:a:0 -vn -c:a copy -bsf:a 'setts=time_base=1/48000:
 回帰は`negativeMkvAudio.{test,flow.test,regression.test}.ts`、`previewAudioSources.test.ts`、`previewAudioRoute.test.ts`と`verify-negative-mkv-audio.mjs`。ブラウザ録音の最初の非ゼロを時刻0と推定しない。負Opusではsource.1の最初の非ゼロがmedia約.2秒からでもpulseはmedia約.5秒に正しくあるため、pulse時のmedia時計を既知.5（Opus）／.52（AAC）と比較する。capture開始後のpulse窓・onsetも診断に残す。正常WebM／MP4／AAC primingだけのMKVは元bytesを保持する。
 
 一般VFR・他codec/rate・不明metadata・他原点・negative videoは未修復。ChromiumのEOF約1µs前からの`play()`が先頭へ戻る一般挙動も別残件で、今回のfixtureの合法source末尾は派生EOFより前にある。書き出し／containの負原点全般を修復したものではなく、#72はOPENのまま。
+
+## 長尺の再評価とselected音声欠落検知（基準main `b52011e`、PR96後）
+
+短尺MKVの制限を拡大せず、64×64／H264 CFR30・48kHz AACの60／240／300／420／480秒をsource .1〜.7で比較した。
+
+| 原点video/audio | 結果・確認範囲 |
+| --- | --- |
+| 0/0 | 全長さで旧AV両stream正常、旧bytes保持 |
+| 0/+2秒 | 60／240秒は既存修復成功。300／420／480秒は全audio packet診断が1MiBを超え、video-onlyの旧出力が成功公開される（system7／同梱7+probe4） |
+| +2秒/0 | 420秒までは既存修復成功。480秒は全video packet診断が1MiBを超え、既存の映像欠落エラーとなる |
+
+この素材のaudio診断は285秒で1,044,983bytes、286秒で1,048,696bytes。videoは454秒で1,046,736bytes、455秒で1,049,046bytes。PTS桁数／packet数に依存する境界であり、普遍的な時間閾値ではない。実測probe .14〜.27秒で、原因は5秒timeoutではなく出力量。予算は引き上げない。
+
+次の限定対処は長尺の音声修復ではない。selected API（単一動画partの素材DL）の抽出後・公開前だけ、出力が既知H264映像1streamで要求durationを覆い、audioが存在しない場合を調べる。既存の厳密positive-audio MP4 familyと両streamのmetadata被覆に加え、実復号／48kHz化した先頭から必要sampleまでの被覆と連続PTSを証明する。`astats`累計だけでは1秒gapを跨いで必要数へ届く反例があるため、各frameのPTSが直前までの累計samplesと一致し、先頭PTSも0であることを必要とする。paddingやasync resamplingは使わない。
+
+抽出前の入力identityと判定後の入力／出力identityが安定している場合だけ、このジョブの未公開MP4を削除し、音声欠落をエラー表示する。ジョブディレクトリや元素材は削除しない。download／streamは既存のdone条件により409となる。清掃不明／削除失敗を成功へ戻さない。共有extractEditorSegment／compositionには適用せず、gain0の正常出力を保持する。multipart選択はexport-composition経路なので今回の検知対象外。
+
+各追加probe／prefix復号は既存5秒・stdout/stderr合計1MiB・TERM1秒。通常出力にも追加output probeがあり、欠落候補だけsource probeと必要prefix復号が加わる。300秒素材の早期prefixは33frames／33,600samples／3,024bytes、独立6.1／system7／同梱7で0.02〜.09秒だったが一般性能保証ではない。400秒位置は1.82MBとなり未判定へ戻る。長尺後半の欠落修復は残る。
+
+正常AV出力、音声なし入力、短いaudio、PTS gap、未知metadata、診断失敗／予算超過、identity変更は従来bytes／成功を保持する。実無音AACは保持すべき音声trackなので、明確なtrack欠落は検知対象とする。保存DTO／source値／Undo/Redoは変更しない。
+
+自動回帰は`selectedSegmentAudio.{test,regression.test}.ts`、selected routeの非同期job test、`verify-selected-audio-loss.mjs`。検証済み早期区間だけの欠落検知であり、音声復元・一般VFR・他原点／形式・全長尺の解決とは扱わず、#72はOPENを維持する。

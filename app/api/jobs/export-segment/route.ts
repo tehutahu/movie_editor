@@ -1,8 +1,11 @@
 import { StorageRetentionError } from "@/lib/storageRetention";
 import path from "node:path";
+import { unlink } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { assertFfmpegAvailable, probeVideo } from "@/lib/ffmpeg";
 import { extractEditorSegment } from "@/lib/sourceAvClock";
+import { containAudioInputIdentity } from "@/lib/containAudioRepair";
+import { hasProvenSelectedAudioLoss } from "@/lib/selectedSegmentAudio";
 import {
   createRetainedJobRecord,
   patchJobRecord,
@@ -83,6 +86,7 @@ export async function POST(req: Request) {
     runDetached(job.id, async () => {
       const jobDirAbs = await ensureJobDir(job.id);
       const outAbs = path.join(jobDirAbs, "output_segment.mp4");
+      const inputIdentity = await containAudioInputIdentity(inputPath);
       await extractEditorSegment({
         inputPath,
         outputPath: outAbs,
@@ -95,6 +99,12 @@ export async function POST(req: Request) {
         }),
       });
       assertJobOutputFile(job.id, outAbs);
+      if (await hasProvenSelectedAudioLoss({ input: inputPath, output: outAbs,
+        start: range.startSec, end: range.endSec, inputIdentity })) {
+        // Only this job's unpublished output belongs to this failure path.
+        await unlink(outAbs);
+        throw new Error("素材区間の音声を取り出せません。音声が欠落した書き出しを中止しました。");
+      }
       patchJobRecord(job.id, { outputPath: outAbs });
       await pruneJobsAfterComplete(job.id);
     });
