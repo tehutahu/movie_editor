@@ -7,17 +7,27 @@ import { containAudioInputIdentity, containAudioSeekFromProbe, sameContainAudioI
   verifiedClockDuration, verifiedClockRangeCovered } from "./containAudioRepair";
 import { extractSegmentTimes, resolveFfmpegPath, resolveFfprobePath, type FfProbeJson } from "./ffmpeg";
 
+/** Candidate metadata only; the complete packet grid and its measured average
+ * must still agree before any candidate is generated. No general VFR claim. */
+export function sourceAvRepairRate(rate: unknown): boolean {
+  const m = typeof rate === "string" ? /^(\d{1,20})\/(\d{1,20})$/.exec(rate) : null;
+  if (!m) return false;
+  const n = BigInt(m[1]), d = BigInt(m[2]);
+  return d > BigInt(0) && n >= BigInt(15) * d && n <= BigInt(30) * d;
+}
+
 export function sourceAvClockFromProbe(raw: FfProbeJson) {
   const audio = containAudioSeekFromProbe(raw);
   if (!audio) return null;
   const v = raw.streams!.find(s => s.codec_type === "video")!;
   const origin = Number(v.start_time), videoDuration = verifiedClockDuration(v);
   if (!videoDuration) return null;
-  // Decode/normalize fallback is deliberately limited to the measured CFR30
-  // family. Preview's offset does not resample media and needs no rate gate.
+  // Only CFR30 or the bounded 1/2-tick family can reach packet verification.
+  // Preview's offset does not resample media and needs no rate gate.
   return { videoOrigin: origin, videoDuration, audioDuration: audio.audioDuration,
     videoStartPts: String(v.start_pts), videoTimeBase: v.time_base!,
-    repairable: v.avg_frame_rate === "30/1" && v.r_frame_rate === "30/1" };
+    averageRate: v.avg_frame_rate!,
+    repairable: sourceAvRepairRate(v.avg_frame_rate) && v.r_frame_rate === "30/1" };
 }
 async function boundedProbe(file: string, signal?: AbortSignal): Promise<FfProbeJson> {
   return JSON.parse(await runBoundedAudioAux(resolveFfprobePath(),
@@ -56,6 +66,11 @@ export function incompleteSourceAvSegment(raw: FfProbeJson, duration: number): b
   return unknown ? null : false;
 }
 const num = (n: number) => String(Number(n.toFixed(9)));
+// Below ffmpeg's signed-int denominator limit and divisible by 30, so the
+// output cadence is exact while source cuts retain sub-microsecond precision.
+// ffmpeg 6.1 converts settb=1/1920000000 to 1/1919999999, breaking the
+// cadence. 30e6 survives that conversion exactly and resolves our ±1µs cuts.
+const VIDEO_CLOCK_DEN = 30_000_000;
 /** Same positive decimal -> microsecond truncation -> nearest 48k sample as
  * ffmpeg's output seek. Integer arithmetic avoids binary boundary drift. */
 export function sourceAudioSample(start: number): number {
@@ -64,9 +79,10 @@ export function sourceAudioSample(start: number): number {
   return Number((micros * BigInt(48000) + BigInt(500000)) / BigInt(1_000_000));
 }
 /** Old bundled probes can include a positive origin in stream.duration.
- * Prove a complete contiguous CFR30 packet grid before trusting EOF coverage.
+ * Prove a complete contiguous 30Hz packet grid before trusting EOF coverage.
+ * Default remains CFR; explicit maxFrameTicks=2 allows only 1/2-tick cadence.
  * Full packet diagnostics retain the same 5s/1MiB auxiliary limits. */
-export function verifiedVideoPacketDuration(raw: { packets?: { pts?: number | string; duration?: number | string }[] }, startPts: string, timeBase: string) {
+export function verifiedVideoPacketDuration(raw: { packets?: { pts?: number | string; duration?: number | string }[] }, startPts: string, timeBase: string, maxFrameTicks: 1 | 2 = 1, averageRate?: string) {
   if (!raw || !Array.isArray(raw.packets) || !raw.packets.length) return null;
   const tb = /^(\d{1,20})\/(\d{1,20})$/.exec(timeBase);
   if (!tb || !/^-?\d{1,40}$/.test(startPts)) return null;
@@ -74,10 +90,22 @@ export function verifiedVideoPacketDuration(raw: { packets?: { pts?: number | st
   if (!numerator || !denominator || denominator % numerator !== BigInt(0)) return null;
   const step = denominator / numerator;
   const integer = (x: unknown) => typeof x === "number" ? Number.isSafeInteger(x) : typeof x === "string" && /^-?\d{1,40}$/.test(x);
-  if (raw.packets.some(p => !p || !integer(p.pts) || !integer(p.duration) || BigInt(p.duration!) !== step)) return null;
-  const pts = raw.packets.map(p => BigInt(p.pts!)).sort((a,b) => a < b ? -1 : a > b ? 1 : 0);
-  if (pts.some((p,i) => p !== BigInt(startPts) + BigInt(i) * step)) return null;
-  return { n: BigInt(pts.length), d: BigInt(30) };
+  if (raw.packets.some(p => !p || !integer(p.pts) || !integer(p.duration) ||
+      ![step, ...(maxFrameTicks === 2 ? [step * BigInt(2)] : [])].includes(BigInt(p.duration!)))) return null;
+  const packets = raw.packets.map(p => ({ pts: BigInt(p.pts!), duration: BigInt(p.duration!) }))
+    .sort((a,b) => a.pts < b.pts ? -1 : a.pts > b.pts ? 1 : 0);
+  let next = BigInt(startPts);
+  for (const packet of packets) {
+    if (packet.pts !== next) return null; // gaps, duplicates, overlap, off-grid
+    next += packet.duration;
+  }
+  const duration = { n: (next - BigInt(startPts)) * BigInt(tb[1]), d: BigInt(tb[2]) };
+  if (averageRate !== undefined) {
+    const rate = /^(\d{1,20})\/(\d{1,20})$/.exec(averageRate);
+    if (!rate || BigInt(rate[2]) === BigInt(0) ||
+        BigInt(packets.length) * duration.d * BigInt(rate[2]) !== BigInt(rate[1]) * duration.n) return null;
+  }
+  return duration;
 }
 
 /** Called only after successful legacy extraction, never hides its failure.
@@ -93,6 +121,9 @@ export async function repairSourceAvSegment(params: { input: string; output: str
   if (signal?.aborted) throw new AudioAuxAbort();
   if (!clock?.repairable || ![clock.audioDuration, clock.videoDuration].every(limit =>
     verifiedClockRangeCovered(limit, num(start), num(duration)))) return false;
+  // Filter expressions use doubles; keep high-resolution integer PTS inside their
+  // exact range. This is candidate eligibility, never a saved source rewrite.
+  if (!Number.isSafeInteger(Math.round((clock.videoOrigin + end) * VIDEO_CLOCK_DEN))) return false;
   let candidate: string | undefined;
   try {
     const old = await boundedProbe(output, signal);
@@ -101,7 +132,7 @@ export async function repairSourceAvSegment(params: { input: string; output: str
     const packets = JSON.parse(await runBoundedAudioAux(resolveFfprobePath(),
       ["-v", "error", "-select_streams", "v:0", "-show_packets", "-show_entries", "packet=pts,duration", "-of", "json", input],
       { timeoutMs: CONTAIN_AUDIO_AUX_BUDGET.probeMs, signal }));
-    const videoDuration = verifiedVideoPacketDuration(packets, clock.videoStartPts, clock.videoTimeBase);
+    const videoDuration = verifiedVideoPacketDuration(packets, clock.videoStartPts, clock.videoTimeBase, 2, clock.averageRate);
     if (signal?.aborted) throw new AudioAuxAbort();
     if (!videoDuration || !verifiedClockRangeCovered(videoDuration, num(start), num(duration))) return false;
     if (!await sameContainAudioInput(clock.identity)) return false;
@@ -109,7 +140,10 @@ export async function repairSourceAvSegment(params: { input: string; output: str
     const frames = Math.ceil(duration * 30);
     // Match contain's hold-previous CFR sampling, including an exclusive end.
     // Audio decodes from its own zero and is trimmed independently of video.
-    const video = `trim=end=${num(clock.videoOrigin + end)},setpts=PTS-${num(clock.videoOrigin + start)}/TB,fps=30:start_time=0:round=up,tpad=stop_mode=clone:stop_duration=${num((frames + 1) / 30)},trim=end_frame=${frames},setpts=N/(30*TB)${size ? `,scale=${size.width}:${size.height},setsar=1,format=yuv420p` : ""}`;
+    // Preserve a microsecond before/after a boundary, including 1/30s whose
+    // PTS has a fractional microsecond. Divisibility by 30 avoids rescaling
+    // that boundary just after its intended output frame. No ns guarantee.
+    const video = `settb=1/${VIDEO_CLOCK_DEN},trim=end=${num(clock.videoOrigin + end)},setpts=PTS-${num(clock.videoOrigin + start)}/TB,fps=30:start_time=0:round=up,tpad=stop_mode=clone:stop_duration=${num((frames + 1) / 30)},trim=end_frame=${frames},setpts=N/(30*TB)${size ? `,scale=${size.width}:${size.height},setsar=1,format=yuv420p` : ""}`;
     const audio = `aresample=48000,atrim=start_sample=${sourceAudioSample(start)}:end_sample=${sourceAudioSample(start) + sourceAudioSample(duration)},asetpts=PTS-STARTPTS,apad`;
     await runBoundedAudioAux(resolveFfmpegPath(), ["-y", "-copyts", "-noaccurate_seek", "-ss", num(start), "-i", input,
       "-i", input, "-filter_complex", `[0:v:0]${video}[v];[1:a:0]${audio}[a]`,

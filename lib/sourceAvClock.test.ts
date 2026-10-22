@@ -24,7 +24,7 @@ vi.mock("./containAudioRepair", async original => {
 });
 vi.mock("./ffmpeg", async original => ({ ...await original<typeof import("./ffmpeg")>(),
   extractSegmentTimes: async () => { await writeFile(fake.output,"old output"); } }));
-import { extractEditorSegment, incompleteSourceAvSegment, inspectSourceAvClock, repairSourceAvSegment, sourceAudioSample, sourceAvClockFromProbe, verifiedVideoPacketDuration } from "./sourceAvClock";
+import { extractEditorSegment, incompleteSourceAvSegment, inspectSourceAvClock, repairSourceAvSegment, sourceAudioSample, sourceAvClockFromProbe, sourceAvRepairRate, verifiedVideoPacketDuration } from "./sourceAvClock";
 import type { FfProbeJson } from "./ffmpeg";
 let dir: string;
 const raw = (): FfProbeJson => ({ format: {start_time:"0"}, streams: [
@@ -97,6 +97,36 @@ it("packet EOF rejects a short actual video even when an old probe overreports i
 });
 it.each([{}, {packets:[]}, {packets:[{pts:30720,duration:1024}]}, {packets:[{pts:30720,duration:512},{pts:31744,duration:512}]}])("unknown or non-CFR packet grid is ineligible: %j", packets => {
   expect(verifiedVideoPacketDuration(packets,"30720","1/15360")).toBeNull();
+});
+it("bounded variable cadence sorts packet pairs and derives EOF from durations rather than count",()=>{
+  const packets={packets:[{pts:31744,duration:512},{pts:30720,duration:1024}]};
+  expect(verifiedVideoPacketDuration(packets,"30720","1/15360",2,"20/1")).toEqual({n:BigInt(1536),d:BigInt(15360)});
+  expect(verifiedVideoPacketDuration(packets,"30720","1/15360",2,"30/1")).toBeNull();
+  expect(verifiedVideoPacketDuration(packets,"30720","1/15360")).toBeNull();
+});
+it.each([
+ [{pts:30720,duration:1024},{pts:32256,duration:512}], // hole
+ [{pts:30720,duration:1024},{pts:30720,duration:512}], // duplicate
+ [{pts:30720,duration:1024},{pts:31232,duration:512}], // overlap
+ [{pts:30721,duration:512}], // first off-grid
+ [{pts:30720,duration:1536}], // outside 1/2 tick family
+ [{pts:30720,duration:513}],
+ [{pts:30720}],
+].map(packets=>({packets})))("bounded VFR rejects unproven grids: %j",raw=>{
+  expect(verifiedVideoPacketDuration(raw,"30720","1/15360",2)).toBeNull();
+});
+it.each([undefined,"0/0","31/1","14/1","NaN","30","3e1/1","30/0"])("unproven nominal rate %s is not eligible",rate=>{
+  expect(sourceAvRepairRate(rate)).toBe(false);
+});
+it("verified 1/2-tick variable cadence can repair but its actual short EOF cannot",async()=>{
+  const r=raw();r.streams![0].avg_frame_rate="20/1";fake.source=r;
+  fake.packets={packets:Array.from({length:40},(_,i)=>({pts:30720+Math.floor(i/2)*1536+(i%2)*1024,duration:i%2?512:1024}))};
+  expect(await repairSourceAvSegment(params())).toBe(true);
+  await writeFile(fake.output,"old output");fake.calls=[];
+  fake.packets={packets:[{pts:30720,duration:1024},{pts:31744,duration:512}]};
+  expect(await repairSourceAvSegment(params())).toBe(false);
+  expect((await readFile(fake.output)).toString()).toBe("old output");
+  expect(fake.calls.filter(c=>c.includes("-filter_complex"))).toHaveLength(0);
 });
 it.each([[1/30,1600],[.500010416,24000],[.500010417,24000],[.500020833,24001],[.500020834,24001]])("integer seek quantization %s -> sample %s", (time,sample) => {
   expect(sourceAudioSample(time)).toBe(sample);
