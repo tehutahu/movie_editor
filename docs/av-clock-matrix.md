@@ -84,3 +84,33 @@ ffmpeg -ss 0.1 -i positive-audio.mp4 -t 0.6 -c:v libx264 -c:a aac old.mp4
 | 負video指定WebM／MKV | 初期packet PTS不明 | 安全な負video時計の証明に使わない |
 
 このため負原点を一律加減算しない。正常なWebMを壊さず、MKVのseek時刻契約は別の残件として保持する。MKV映像には対照と共通で.500秒が赤／.501秒が青というms境界もあり、負audio固有の症状と混同しない。
+
+## 負audio MKVプレビューの限定単位（基準main `2d90244`、PR94後）
+
+次の最小例をsystem7.1／同梱7.0／隔離6.1で調査した。指定audio offset −.2秒が、AAC priming込みで実audio／format原点−.221秒となる。video原点は0。全復号PCMの先頭をsource0とし、primingを削除しない。
+
+```sh
+ffmpeg -f lavfi -i 'color=red:s=64x64:r=30:d=2' -f lavfi -i 'aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*gte(t\,0.5)*lt(t\,0.52):s=48000:d=2' -af 'asetpts=PTS-0.2/TB' -c:v libx264 -bf 0 -c:a aac -fps_mode passthrough -avoid_negative_ts disabled negative.mkv
+ffmpeg -i negative.mkv -map 0:a:0 -vn -c:a copy -bsf:a 'setts=time_base=1/48000:pts=N*1024:dts=N*1024:duration=1024' -movie_timescale 48000 normalized.m4a
+```
+
+| source開始 | 元MKVをseek後のpulse（再生から） | `max(0, source−.221)`補正 | 正規化M4Aのpulse（再生から） |
+| --- | --- | --- | --- |
+| 0 | 約.52秒 | 約.52秒 | 約.52秒 |
+| .05 | .25秒 | .52秒 | .47秒 |
+| .1 | .20秒 | .52秒 | .42秒 |
+| .2 | .10秒 | .52秒 | .32秒 |
+| .25 | .05秒 | .27秒 | .27秒 |
+| .5 | 消失 | .02秒 | .02秒 |
+
+単純offsetは早いsource区間を回復できない。AAC packet copyは3encoderそれぞれで元媒体と全97,280 sample-frameのstereo f32 PCMが一致し、95packetのpayload hashも一致した。単純copyにはduration末尾24samplesの差が残るため採用しない。候補はpacket時計・durationを1/48000上の1024samples格子へ揃える。古いprobe4はmovie timescale1000のdurationを97296samplesへ丸めるため、movie timescaleも48000にして、厳密97280samplesを再probe・全packet・全復号frameから証明する。
+
+対象は実ファイル4MiB以下、format duration5秒以下、H264／CFR30／video0／time base1/1000、AAC-LC 48k mono/stereo／time base1/1000、audio／format負原点一致（−2秒以上、−.05秒未満）、各1stream。全audio packetはfirstPTS一致、1024sampleのms量子化格子から1tick以内、duration21ms、DTS=PTS、skip等side dataなし、240packet以下が必要。1秒gapの反例は全PCM/payload一致でも失敗とする。全復号frameを1024samples×stereo-f32の8192bytesで確認し、順序付きSHA256を比較する。候補のaudio EOFが元containerのsource末尾を少なくとも1ms超えて覆うことも必要で、短いaudioへのseek後先頭巻戻りを追加しない。読み終わりまでinput identityを再検証し一時候補は清掃する。
+
+製品では原streamを置換しない。任意の補助POSTは、証明済み完成M4Aだけを最大1MiBで返し、対象外は204。プレビューownerが明示Play前に参照MKVを最大8件順次準備し、全完了後にだけBlob URLを一括採用する。原URLと派生のRange混在は起こさない。native／fadeは同じURL resolverを使い、後続partの別assetも準備してから公開時計を開始する。停止・exact seek・非表示時の準備中断・epoch交換はabort／世代を進め、遅い結果の公開・再開を防ぐ。失敗時は原URL固定、メモリURLは不要時と交換／unmountでrevokeする。9件目以降・再生中追加の未準備assetは原経路を保つ。
+
+補助processは各5秒／stdout-stderr合計1MiB／TERM猶予1秒。サーバーは同時2candidateと8identity分最大8MiBを保持し、入力差替えをstat identityで除外する。クライアントも最大8Blob（各1MiB）で、準備中の公開前URLも中断時に清掃する。これは短尺の限定診断で、長尺・大容量・4Kの費用保証ではない。
+
+回帰は`negativeMkvAudio.{test,flow.test,regression.test}.ts`、`previewAudioSources.test.ts`、`previewAudioRoute.test.ts`と`verify-negative-mkv-audio.mjs`。ブラウザ録音の最初の非ゼロを時刻0と推定しない。負Opusではsource.1の最初の非ゼロがmedia約.2秒からでもpulseはmedia約.5秒に正しくあるため、pulse時のmedia時計を既知.5（Opus）／.52（AAC）と比較する。capture開始後のpulse窓・onsetも診断に残す。正常WebM／MP4／AAC primingだけのMKVは元bytesを保持する。
+
+一般VFR・他codec/rate・不明metadata・他原点・negative videoは未修復。ChromiumのEOF約1µs前からの`play()`が先頭へ戻る一般挙動も別残件で、今回のfixtureの合法source末尾は派生EOFより前にある。書き出し／containの負原点全般を修復したものではなく、#72はOPENのまま。
