@@ -19,12 +19,13 @@ it("ineligible diagnostics retain the original URL across repeat play", async ()
   const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 })), owner = createPreviewAudioSources();
   await owner.prepare([asset]); await owner.prepare([asset]); expect(fetch).toHaveBeenCalledTimes(1); expect(owner.url(asset)).toBe(asset.streamUrl);
 });
-it.each([
+const invalidHeaders: Record<string, string>[] = [
   { "Content-Type": "application/json", "Content-Length": "3" },
   { "Content-Type": "audio/mp4" },
   { "Content-Type": "audio/mp4", "Content-Length": "1048577" },
   { "Content-Type": "audio/mp4", "Content-Length": "4" },
-])("unknown or oversized HTTP metadata cannot publish a URL %j", async headers => {
+];
+it.each(invalidHeaders)("unknown or oversized HTTP metadata cannot publish a URL %j", async headers => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { headers }));
   const create = vi.spyOn(URL, "createObjectURL"), owner = createPreviewAudioSources();
   await owner.prepare([asset]); expect(create).not.toHaveBeenCalled(); expect(owner.url(asset)).toBe(asset.streamUrl);
