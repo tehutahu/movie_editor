@@ -51,10 +51,11 @@ export async function hasProvenSelectedAudioLoss(params: {
         !Array.isArray(result.streams) || result.streams.length !== 1) return false;
     const video = result.streams[0];
     if (!video || video.codec_type !== "video" || video.codec_name !== "h264" ||
-        typeof video.start_time !== "string" || typeof video.duration !== "string") return false;
+        typeof video.start_time !== "string" || !/^\d{1,10}\.\d{6}$/.test(video.start_time) ||
+        typeof video.duration !== "string" || !/^\d{1,10}\.\d{6}$/.test(video.duration)) return false;
     const outputStart = Number(video.start_time), outputDuration = Number(video.duration);
     if (!Number.isFinite(outputStart) || outputStart < 0 || outputStart > 1 / 30 ||
-        !Number.isFinite(outputDuration) || outputDuration < duration - 1 / 30 || outputDuration > duration + 1 / 30) return false;
+        !Number.isFinite(outputDuration) || outputDuration <= 0 || outputDuration < duration - 1 / 30 || outputDuration > duration + 1 / 30) return false;
     const source = await probe(input), clock = positiveAudioClockFromProbe(source);
     if (!clock) return false;
     const videoDuration = verifiedClockDuration(source.streams!.find(s => s.codec_type === "video")!);

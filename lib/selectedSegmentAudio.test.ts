@@ -57,9 +57,13 @@ it.each([
   expect(await hasProvenSelectedAudioLoss(params())).toBe(false); expect(mocks.run).toHaveBeenCalledTimes(1);
 });
 it.each([{ start_time: "N/A" }, { duration: "NaN" }, { start_time: "0.100000" },
-  { duration: "0.000000" }, { duration: "3.000000" }, { codec_name: "vp9" }])("keeps unverified video %j", async patch => {
+  { start_time: "" }, { duration: "" }, { duration: "0.000000" }, { duration: "3.000000" }, { codec_name: "vp9" }])("keeps unverified video %j", async patch => {
   const out = output(); Object.assign(out.streams![0], patch); responses(out);
   expect(await hasProvenSelectedAudioLoss({ ...params(), end: .6 })).toBe(false);
+});
+it("keeps a zero-duration video unknown even for a one-frame selection", async () => {
+  const out = output(); out.streams![0].duration = "0.000000"; responses(out);
+  expect(await hasProvenSelectedAudioLoss(params())).toBe(false);
 });
 it.each(["zero-origin", "noaudio", "shortaudio", "shortvideo", "other-rate"])("keeps input outside proof: %s", async kind => {
   const s = source();
