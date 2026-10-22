@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { extractSegmentTimes, probeMedia } from "./ffmpeg";
+import { extractSegmentTimes, probeMedia, resolveFfmpegPath } from "./ffmpeg";
 import { extractEditorSegment, incompleteSourceAvSegment, repairSourceAvSegment, sourceAudioSample } from "./sourceAvClock";
 import { exportCompositionToFile } from "./exportComposition";
 import { createEmptyProject } from "./editor/project";
@@ -12,7 +12,7 @@ const sources = vi.hoisted(() => new Map<string, string>());
 vi.mock("@/lib/assetResolve", () => ({ resolveAssetInputPath: async (a: Asset) => sources.get(a.id) ?? null }));
 const real = process.env.RUN_FFMPEG_TESTS === "1";
 let dir: string, input: string, zero: string;
-function ff(args: string[]) { return execFileSync(process.env.FFMPEG_PATH ?? "/usr/bin/ffmpeg", ["-v", "error", "-y", ...args], { maxBuffer: 16 * 1024 * 1024 }); }
+function ff(args: string[]) { return execFileSync(resolveFfmpegPath(), ["-v", "error", "-y", ...args], { maxBuffer: 16 * 1024 * 1024 }); }
 beforeAll(async () => {
   if (!real) return;
   dir = await mkdtemp(path.join(tmpdir(), "source-av-clock-")); input = path.join(dir, "delayed.mp4"); zero = path.join(dir, "zero.mp4");
