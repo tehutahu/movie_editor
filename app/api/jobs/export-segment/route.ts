@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { assertFfmpegAvailable, probeVideo } from "@/lib/ffmpeg";
 import { extractEditorSegment } from "@/lib/sourceAvClock";
 import { containAudioInputIdentity } from "@/lib/containAudioRepair";
-import { hasProvenSelectedAudioLoss } from "@/lib/selectedSegmentAudio";
+import { recoverSelectedSegmentAudio } from "@/lib/selectedSegmentAudio";
 import {
   createRetainedJobRecord,
   patchJobRecord,
@@ -99,8 +99,8 @@ export async function POST(req: Request) {
         }),
       });
       assertJobOutputFile(job.id, outAbs);
-      if (await hasProvenSelectedAudioLoss({ input: inputPath, output: outAbs,
-        start: range.startSec, end: range.endSec, inputIdentity })) {
+      if (await recoverSelectedSegmentAudio({ input: inputPath, output: outAbs,
+        start: range.startSec, end: range.endSec, inputIdentity }) === "missing") {
         // Only this job's unpublished output belongs to this failure path.
         await unlink(outAbs);
         throw new Error("素材区間の音声を取り出せません。音声が欠落した書き出しを中止しました。");

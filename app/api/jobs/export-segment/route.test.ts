@@ -17,7 +17,7 @@ vi.mock("@/lib/ffmpeg", async original => ({
 }));
 vi.mock("@/lib/mediaSource", () => ({ resolveInputPath: mocks.resolve }));
 vi.mock("@/lib/sourceAvClock", () => ({ extractEditorSegment: mocks.extract }));
-vi.mock("@/lib/selectedSegmentAudio", () => ({ hasProvenSelectedAudioLoss: mocks.guard }));
+vi.mock("@/lib/selectedSegmentAudio", () => ({ recoverSelectedSegmentAudio: mocks.guard }));
 vi.mock("node:fs/promises", async original => {
   const fs = await original<typeof import("node:fs/promises")>();
   return { ...fs, unlink: async (file: string) => {
@@ -46,7 +46,7 @@ async function start(sourceJobId?: string) {
   return { jobId, inputPath, out: path.join(JOBS_ROOT, jobId, "output_segment.mp4") };
 }
 it("proven missing audio becomes job error, removes only output, and denies publication", async () => {
-  mocks.guard.mockResolvedValue(true);
+  mocks.guard.mockResolvedValue("missing");
   const { jobId, inputPath, out } = await start();
   expect(getJobRecord(jobId)).toMatchObject({ status: "error", error: expect.stringContaining("音声が欠落") });
   expect(getJobRecord(jobId)?.outputPath).toBeUndefined();
@@ -57,13 +57,13 @@ it("proven missing audio becomes job error, removes only output, and denies publ
   expect((await stream(new Request("http://test/api/jobs/" + jobId + "/stream"), ctx)).status).toBe(409);
 });
 it("inconclusive/healthy output retains its exact bytes and existing success contract", async () => {
-  mocks.guard.mockResolvedValue(false);
+  mocks.guard.mockResolvedValue("unchanged");
   const { jobId, out } = await start();
   expect(getJobRecord(jobId)).toMatchObject({ status: "done", outputPath: out });
   expect(await readFile(out, "utf8")).toBe("legacy bytes");
 });
 it("passes the resolved input and pre-extraction identity to diagnosis, including sourceJobId", async () => {
-  mocks.guard.mockResolvedValue(false);
+  mocks.guard.mockResolvedValue("unchanged");
   mocks.extract.mockImplementation(async ({ inputPath, outputPath }: { inputPath: string; outputPath: string }) => {
     await writeFile(inputPath, "changed after snapshot"); await writeFile(outputPath, "legacy bytes");
   });
@@ -73,7 +73,7 @@ it("passes the resolved input and pre-extraction identity to diagnosis, includin
     inputIdentity: expect.objectContaining({ file: inputPath, stat: expect.objectContaining({ size: 12 }) }) });
 });
 it("unlink failure stays a job error without registering output", async () => {
-  mocks.guard.mockResolvedValue(true); mocks.failUnlink = true;
+  mocks.guard.mockResolvedValue("missing"); mocks.failUnlink = true;
   const { jobId, out } = await start();
   expect(getJobRecord(jobId)).toMatchObject({ status: "error", error: "synthetic unlink denied" });
   expect(getJobRecord(jobId)?.outputPath).toBeUndefined(); await access(out);
@@ -88,4 +88,11 @@ it("initial extraction failure is preserved and never invokes optional diagnosis
   const { jobId } = await start();
   expect(getJobRecord(jobId)).toMatchObject({ status: "error", error: "initial extraction failed" });
   expect(mocks.guard).not.toHaveBeenCalled();
+});
+
+it("verified recovery publishes the recovered file through the existing job contract", async () => {
+  mocks.guard.mockImplementation(async ({ output }: { output: string }) => { await writeFile(output, "recovered bytes"); return "repaired"; });
+  const { jobId, out } = await start();
+  expect(getJobRecord(jobId)).toMatchObject({ status: "done", outputPath: out });
+  expect(await readFile(out, "utf8")).toBe("recovered bytes");
 });
