@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { extractSegmentTimes, probeMedia, resolveFfmpegPath } from "./ffmpeg";
-import { extractEditorSegment, repairSourceAvSegment, sourceAudioSample } from "./sourceAvClock";
+import { extractEditorSegment, repairSourceAvSegment } from "./sourceAvClock";
 import { exportCompositionToFile } from "./exportComposition";
 import { createEmptyProject } from "./editor/project";
 import type { Asset, MediaClip } from "./editor/types";
@@ -34,7 +34,11 @@ async function oracle(file:string,start:number,duration:number,exactPCM=true,sou
   // Full decode is the reference, including AAC priming. Do not reinterpret
   // its first audible pulse as the origin or fit an offset to the output.
   const full=ff(["-i",source,"-vn","-ac","2","-ar","48000","-f","f32le","pipe:1"]);
-  const first=sourceAudioSample(start),count=sourceAudioSample(duration);
+  // Fixed oracle indices are independent of the production seek formatter.
+  const first=new Map([[0,0],[.1,4800],[1/30,1600],[.499999,24000],[.5,24000],[.500001,24000]]).get(start);
+  if(first===undefined)throw Error("Missing fixed sample oracle");
+  const count=duration===.7?33600:duration===.6?28800:0;
+  expect(count).toBeGreaterThan(0);
   const raw=path.join(dir,`ref-${start}-${duration}.pcm`),reference=path.join(dir,`ref-${start}-${duration}.m4a`);
   await writeFile(raw,full.subarray(first*8,(first+count)*8));
   ff(["-f","f32le","-ac","2","-ar","48000","-i",raw,"-af","apad","-t",String(duration),"-c:a","aac",reference]);
