@@ -24,7 +24,12 @@ async function load(doc, name) {
 }
 async function seek(time, channel) {
   const input = page.getByRole('textbox', { name: '再生位置', exact: true });
-  await input.fill(String(time)); await input.press('Enter'); await input.blur();
+  // The existing UI accepts six decimals. Source cuts retain their full DTO
+  // precision; format only this user-entered presentation time.
+  const target=Number(time.toFixed(6));
+  await input.fill(String(target)); await input.press('Enter');
+  assert.equal(await input.getAttribute('aria-invalid'),'false'); await input.blur();
+  assert.equal(Number(await input.inputValue()),target);
   await page.waitForFunction(channel => {
     const c = document.querySelector('.compositor-canvas'), p = c.getContext('2d').getImageData(c.width / 2, c.height / 2, 1, 1).data;
     return p[channel] > 220 && p[channel === 0 ? 2 : 0] < 25;
