@@ -101,7 +101,7 @@ it.each([{}, {packets:[]}, {packets:[{pts:30720,duration:1024}]}, {packets:[{pts
 it.each([[1/30,1600],[.500010416,24000],[.500010417,24000],[.500020833,24001],[.500020834,24001]])("integer seek quantization %s -> sample %s", (time,sample) => {
   expect(sourceAudioSample(time)).toBe(sample);
 });
-it.each([{}, {streams:[{}]}, {streams:"unknown"}, complete()])("selected wrapper preserves unknown/healthy legacy success: %j", async old => {
+it.each([null, {}, {streams:[{}]}, {streams:"unknown"}, complete()])("selected wrapper preserves unknown/healthy legacy success: %j", async old => {
   fake.old=old;fake.source={};await extractEditorSegment({inputPath:fake.input,outputPath:fake.output,startSec:.1,endSec:.7});
   expect((await readFile(fake.output)).toString()).toBe("old output");
 });

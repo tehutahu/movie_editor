@@ -67,11 +67,11 @@ export function sourceAudioSample(start: number): number {
  * Prove a complete contiguous CFR30 packet grid before trusting EOF coverage.
  * Full packet diagnostics retain the same 5s/1MiB auxiliary limits. */
 export function verifiedVideoPacketDuration(raw: { packets?: { pts?: number | string; duration?: number | string }[] }, startPts: string, timeBase: string) {
-  if (!Array.isArray(raw.packets) || !raw.packets.length) return null;
+  if (!raw || !Array.isArray(raw.packets) || !raw.packets.length) return null;
   const tb = /^(\d{1,20})\/(\d{1,20})$/.exec(timeBase);
   if (!tb || !/^-?\d{1,40}$/.test(startPts)) return null;
   const numerator = BigInt(tb[1]) * BigInt(30), denominator = BigInt(tb[2]);
-  if (!numerator || denominator % numerator !== BigInt(0)) return null;
+  if (!numerator || !denominator || denominator % numerator !== BigInt(0)) return null;
   const step = denominator / numerator;
   const integer = (x: unknown) => typeof x === "number" ? Number.isSafeInteger(x) : typeof x === "string" && /^-?\d{1,40}$/.test(x);
   if (raw.packets.some(p => !p || !integer(p.pts) || !integer(p.duration) || BigInt(p.duration!) !== step)) return null;
@@ -145,7 +145,7 @@ export async function extractEditorSegment(params: Parameters<typeof extractSegm
     if (error instanceof AudioAuxCleanupError) throw error;
     return; // failed optional diagnosis cannot turn a legacy success into error
   }
-  if (Array.isArray(output.streams) && output.streams.every(s => s && typeof s.codec_type === "string") &&
+  if (output && Array.isArray(output.streams) && output.streams.every(s => s && typeof s.codec_type === "string") &&
       !output.streams.some(s => s.codec_type === "video")) {
     await unlink(params.outputPath);
     throw new Error("素材区間から映像を取り出せません。対応する映像時計を確認できませんでした。");
