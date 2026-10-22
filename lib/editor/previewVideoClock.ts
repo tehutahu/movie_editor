@@ -9,6 +9,10 @@ export function createPreviewVideoClock(media: HTMLVideoElement, invalidate: () 
   let calibrating = false;
   let disposed = false;
   let requestedMicros: number | null = null;
+  let verifiedVideoOrigin: number | null = null;
+  // AV can make HTML's earliest time audio zero, while muted decoded video
+  // starts later. A server-verified offset applies only to that measured zero.
+  const effectiveOrigin = () => origin === 0 && verifiedVideoOrigin !== null ? verifiedVideoOrigin : origin;
   const metadata = () => {
     if (disposed || origin !== null || calibrating) return;
     calibrating = true;
@@ -23,7 +27,7 @@ export function createPreviewVideoClock(media: HTMLVideoElement, invalidate: () 
       // translating a positive-origin WebM clock. Correct only an observed
       // underseek, once; a blanket bias would advance genuinely earlier seeks.
       const actual = Math.round(media.currentTime * 1_000_000);
-      if (origin !== null && origin > 0 && requested !== null &&
+      if ((effectiveOrigin() ?? 0) > 0 && requested !== null &&
           actual < requested && requested - actual <= 2 && !media.seeking) {
         media.currentTime = Math.min((requested + 1) / 1_000_000, media.duration);
       }
@@ -38,14 +42,19 @@ export function createPreviewVideoClock(media: HTMLVideoElement, invalidate: () 
   media.addEventListener("loadedmetadata", metadata);
   media.addEventListener("seeked", seeked);
   return {
+    setVerifiedVideoOrigin(value: unknown) {
+      if (disposed || typeof value !== "number" || !Number.isFinite(value) || value <= 0) return;
+      verifiedVideoOrigin = value;
+      invalidate();
+    },
     target(sourceTime: number): number | null {
       if (origin === null || disposed) return null;
-      const target = origin + sourceTime;
+      const target = effectiveOrigin()! + sourceTime;
       return Number.isFinite(media.duration) ? Math.min(target, media.duration) : target;
     },
     seek(target: number) {
       if (disposed || origin === null) return;
-      requestedMicros = origin > 0 ? Math.round(target * 1_000_000) : null;
+      requestedMicros = (effectiveOrigin() ?? 0) > 0 ? Math.round(target * 1_000_000) : null;
       media.currentTime = target;
     },
     dispose() {

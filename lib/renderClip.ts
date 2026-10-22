@@ -1,7 +1,8 @@
 import { multipartDurationArgument, planMultipartVideo } from "@/lib/multipartTiming";
 import type { Asset, Clip } from "@/lib/editor/types";
 import { resolveAssetInputPath } from "@/lib/assetResolve";
-import { extractSegmentTimes, imageToVideoSegment, probeMedia, probeVideo, runFfmpegCommand } from "@/lib/ffmpeg";
+import { imageToVideoSegment, probeMedia, probeVideo, runFfmpegCommand } from "@/lib/ffmpeg";
+import { extractEditorSegment, repairSourceAvSegment } from "@/lib/sourceAvClock";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 
@@ -33,7 +34,7 @@ export async function renderClipToFile(params: {
         if (asset.kind === "image") {
           await imageToVideoSegment({ inputPath: input, outputPath, durationSec: duration });
         } else {
-          await extractSegmentTimes({ inputPath: input, outputPath, startSec: part.sourceInSec, endSec: part.sourceOutSec });
+          await extractEditorSegment({ inputPath: input, outputPath, startSec: part.sourceInSec, endSec: part.sourceOutSec });
         }
         return;
       }
@@ -46,6 +47,8 @@ export async function renderClipToFile(params: {
         "-af", "aresample=48000,apad", "-ac", "2", "-ar", "48000",
         "-t", multipartDurationArgument(duration), "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart", out];
       await runFfmpegCommand(args, { totalDurationSec: duration });
+      if (asset.kind === "video") await repairSourceAvSegment({ input, output: out,
+        start: part.sourceInSec, end: part.sourceOutSec, size: { width, height } });
       const media = await probeMedia(out);
       const video = Boolean(media.streams?.some(s => s.codec_type === "video"));
       const audio = Boolean(media.streams?.some(s => s.codec_type === "audio"));

@@ -1,7 +1,8 @@
 import { StorageRetentionError } from "@/lib/storageRetention";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { assertFfmpegAvailable, extractSegmentTimes, probeVideo } from "@/lib/ffmpeg";
+import { assertFfmpegAvailable, probeVideo } from "@/lib/ffmpeg";
+import { extractEditorSegment } from "@/lib/sourceAvClock";
 import {
   createRetainedJobRecord,
   patchJobRecord,
@@ -82,7 +83,7 @@ export async function POST(req: Request) {
     runDetached(job.id, async () => {
       const jobDirAbs = await ensureJobDir(job.id);
       const outAbs = path.join(jobDirAbs, "output_segment.mp4");
-      await extractSegmentTimes({
+      await extractEditorSegment({
         inputPath,
         outputPath: outAbs,
         startSec: range.startSec,

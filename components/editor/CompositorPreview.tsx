@@ -434,6 +434,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   transformPreviewRef.current = transformPreview;
 
   const requestDraw = useCallback(() => framesRef.current?.invalidate(), []);
+  const sourceClockReads = useRef(new Map<string, Promise<unknown>>());
 
   const ensureMedia = useCallback(
     (layer: ActiveClipLayer): HTMLVideoElement | HTMLImageElement => {
@@ -455,6 +456,18 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
         // Register before src so readiness cannot race listener installation.
         const clock = el instanceof HTMLVideoElement ? createPreviewVideoClock(el, requestDraw) : undefined;
         if (el instanceof HTMLVideoElement && clock) videoClocksRef.current.set(el, clock);
+        if (clock) {
+          const assetKey = mediaLayoutKey(layer.asset);
+          let read = sourceClockReads.current.get(assetKey);
+          if (!read) {
+            read = fetch("/api/media/clock", { method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ asset: layer.asset }) }).then(async r => r.ok ? (await r.json()).videoOrigin : null).catch(() => null);
+            // Bound runtime diagnostics even during repeated project imports.
+            if (sourceClockReads.current.size >= 100) sourceClockReads.current.clear();
+            sourceClockReads.current.set(assetKey, read);
+          }
+          void read.then(value => clock.setVerifiedVideoOrigin(value));
+        }
         const events = el instanceof HTMLVideoElement ? ["loadeddata", "seeked", "durationchange"] : ["load"];
         for (const event of events) el.addEventListener(event, requestDraw);
         const media = el;
