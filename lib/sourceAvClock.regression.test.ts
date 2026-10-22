@@ -37,7 +37,8 @@ function oracle(file: string, shift: number, duration=.7) {
   ff(["-xerror", "-i", file, "-f", "null", "-"]);
   // Decode every frame without seeking: distinguish a product cadence error
   // (including ffmpeg 6.1 settb quantization) from decoder seek behavior.
-  const frames = ff(["-i", file, "-vf", "scale=1:1", "-fps_mode", "passthrough", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"]);
+  // Composition output also includes the project's later empty background.
+  const frames = ff(["-i", file, "-t", String(duration), "-vf", "crop=iw/2:ih/2,scale=1:1", "-fps_mode", "passthrough", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"]);
   expect(frames.length).toBe(Math.ceil(duration * 30) * 3);
   for (let i=0; i<frames.length/3; i++) {
     const channel = shift+i/30 < .5-1e-9 ? 0 : 2;
