@@ -46,3 +46,41 @@ ffmpeg -ss 0.1 -i input.mp4 -t 0.6 -c:v libx264 -c:a aac old.mp4
 - 正常な旧出力・元媒体・保存source値・Undo/Redoは保持。既存containの入力tick未満の精度、負原点、別原点組合せ、一般VFRは残件。
 
 自動回帰は`lib/sourceAvClock.regression.test.ts`と`lib/sourceAvClock.test.ts`。system／bundled両方で、source0／.1／1/30、0.5秒および1/30秒境界±1µsの固定色とfull-f32-decode byte slice＋AAC encodeのdecoded PCM全byteを比較する。ブラウザ回帰は`verify-divergent-av-clock.mjs`でCFR/VFRのpreview・selected・stretch・contain、保存／Redoを実操作する。
+
+## 負原点・別原点の追加評価（基準main `f18a2af`、PR93後）
+
+正原点を追加した6ケースは上記と同じ2秒のvideo／48kHz AACをcopy muxした。source0.1〜0.7秒の旧抽出をsystem7.1と同梱7.0で比較した。指定audio offsetと実原点はAAC primingのため異なる。
+
+| 指定video/audio | 実video/audio/format原点 | 旧system／同梱 | 今回の判定 |
+| --- | --- | --- | --- |
+| 0/0 | 0/0/0 | 両stream正常、pulse .4秒 | 既存正常bytes保持 |
+| 0/+2 | 0/1.978/0 | 両方とも18video frames、audio欠落 | 最小の新修復対象 |
+| +2/+1 | 2/.978/.978 | system両stream欠落、同梱audio欠落 | 今回未修復 |
+| +1/+2 | 1/1.978/1 | 両方ともaudio欠落 | 今回未修復 |
+| +2/+2 | 2/1.978/1.978 | 両streamあり、system video開始.033008秒／同梱0、pulse .42秒 | 旧complete判定を保持、今回未修復 |
+| +.2/+.1 | .2/.078/.078 | 両streamあり、video開始は上と同じ差、pulse .42秒 | 今回未修復 |
+
+最小再現コマンドは上の`video.mp4`／`audio.m4a`を使い、次のとおり。
+
+```sh
+ffmpeg -copyts -i video.mp4 -itsoffset 2 -i audio.m4a -map 0:v:0 -map 1:a:0 -c copy -avoid_negative_ts disabled positive-audio.mp4
+ffprobe -v error -show_format -show_streams -of json positive-audio.mp4
+ffmpeg -ss 0.1 -i positive-audio.mp4 -t 0.6 -c:v libx264 -c:a aac old.mp4
+```
+
+期待sourceは各streamの先頭からの相対区間。全復号PCMにはprimingが残りpulseは約.52秒なので、audioのsource.1〜.7は48kHz stereo f32の4800〜33599 sample-frameを固定byte sliceし、同じAAC encoderで再圧縮した結果を参照とする。pulseを元の.5秒へ合わせるoffset fitやpriming除去はしない。videoはsource.5が最初の色境界（上の4色素材では赤→緑、自動回帰の2色素材では赤→青）。0/.1/1/30および.5±1µsを検証する。
+
+修復はMP4系container、H264 CFR30 video原点0、format原点0、正audio原点、AAC-LC 48kHz mono／stereo、各1streamだけ。旧outputが明確に不完全な場合に限り、audio packetのstartPTS一致・順序・連続性・1024sample（最終のみ1〜1024）・skip等side data不在から実末尾を測る。古いprobe4はこの例のaudio durationを4秒と過大報告するが、packet末尾では2.021333秒となる。さらに実encoderと同じffmpegで`-xerror`・48kHz復号を行い、apad前にsource開始sample＋要求sample数まで到達したことを`astats`の累計で証明する。packet spanだけでdecoderの実sample数を保証しない。
+
+追加packet診断と復号prefix診断は各5秒／stdout-stderr合計1MiB。候補の30秒／TERM1秒、identity・再probe・原子的採用と旧complete bytes保持は既存のまま。長尺sourceへの先頭復号の費用保証はしない。native／fade音声preview、contain、他codec／rate／VFR、他原点組合せはこの修復の対象外。
+
+負原点は独立したChromium154単体のvideo／音声captureで対照比較した（アプリの拡張子受理を追加しない）。
+
+| 実container／codecと原点video/audio/format | 対照と全decode PCM | ブラウザ単体結果 |
+| --- | --- | --- |
+| WebM VP9/Opus 0/−.207/−.207 | 対照audio−.007と96000samples全byte一致 | source0/.25/.5でpulse約.5/.25/0。補正不要 |
+| MKV H264/AAC 0/−.221/−.221 | 対照audio−.021と97280samples全byte一致 | 初回0ではpulse約.5、source.25のseek後は.05へ早まり、source.5でpulse消失。未修復 |
+| 負offset指定MP4 | mux後video/audio原点0 | 実負原点の証拠にならない |
+| 負video指定WebM／MKV | 初期packet PTS不明 | 安全な負video時計の証明に使わない |
+
+このため負原点を一律加減算しない。正常なWebMを壊さず、MKVのseek時刻契約は別の残件として保持する。MKV映像には対照と共通で.500秒が赤／.501秒が青というms境界もあり、負audio固有の症状と混同しない。

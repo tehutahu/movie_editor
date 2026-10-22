@@ -6,6 +6,7 @@ import { containAudioInputIdentity, containAudioSeekFromProbe, sameContainAudioI
   runBoundedAudioAux, CONTAIN_AUDIO_AUX_BUDGET, AudioAuxAbort, AudioAuxCleanupError,
   verifiedClockDuration, verifiedClockRangeCovered } from "./containAudioRepair";
 import { extractSegmentTimes, resolveFfmpegPath, resolveFfprobePath, type FfProbeJson } from "./ffmpeg";
+import { positiveAudioClockFromProbe, verifiedPositiveAudioPacketDuration, verifiedDecodedAudioPrefix } from "./positiveAudioClock";
 
 /** Candidate metadata only; the complete packet grid and its measured average
  * must still agree before any candidate is generated. No general VFR claim. */
@@ -17,7 +18,9 @@ export function sourceAvRepairRate(rate: unknown): boolean {
 }
 
 export function sourceAvClockFromProbe(raw: FfProbeJson) {
-  const audio = containAudioSeekFromProbe(raw);
+  const oldClock = containAudioSeekFromProbe(raw);
+  const positiveAudio = oldClock ? null : positiveAudioClockFromProbe(raw);
+  const audio = oldClock ?? positiveAudio;
   if (!audio) return null;
   const v = raw.streams!.find(s => s.codec_type === "video")!;
   const origin = Number(v.start_time), videoDuration = verifiedClockDuration(v);
@@ -26,6 +29,7 @@ export function sourceAvClockFromProbe(raw: FfProbeJson) {
   // Preview's offset does not resample media and needs no rate gate.
   return { videoOrigin: origin, videoDuration, audioDuration: audio.audioDuration,
     videoStartPts: String(v.start_pts), videoTimeBase: v.time_base!,
+    positiveAudioStartPts: positiveAudio?.audioStartPts,
     averageRate: v.avg_frame_rate!,
     repairable: sourceAvRepairRate(v.avg_frame_rate) && v.r_frame_rate === "30/1" };
 }
@@ -135,6 +139,21 @@ export async function repairSourceAvSegment(params: { input: string; output: str
     const videoDuration = verifiedVideoPacketDuration(packets, clock.videoStartPts, clock.videoTimeBase, 2, clock.averageRate);
     if (signal?.aborted) throw new AudioAuxAbort();
     if (!videoDuration || !verifiedClockRangeCovered(videoDuration, num(start), num(duration))) return false;
+    if (clock.positiveAudioStartPts !== undefined) {
+      // This extra family requires CFR30 and proves both packet EOF and actual
+      // decoded PCM coverage. apad must never fabricate a missing source tail.
+      if (clock.averageRate !== "30/1" || !verifiedVideoPacketDuration(packets, clock.videoStartPts, clock.videoTimeBase)) return false;
+      const audioPackets = JSON.parse(await runBoundedAudioAux(resolveFfprobePath(),
+        ["-v", "error", "-select_streams", "a:0", "-show_packets", "-show_entries", "packet=pts,duration,side_data_list", "-of", "json", input],
+        { timeoutMs: CONTAIN_AUDIO_AUX_BUDGET.probeMs, signal }));
+      const audioDuration = verifiedPositiveAudioPacketDuration(audioPackets, clock.positiveAudioStartPts);
+      if (!audioDuration || !verifiedClockRangeCovered(audioDuration, num(start), num(duration))) return false;
+      const required = sourceAudioSample(start) + sourceAudioSample(duration);
+      const prefix = await runBoundedAudioAux(resolveFfmpegPath(), ["-v", "error", "-xerror", "-i", input, "-map", "0:a:0", "-vn",
+        "-af", `aresample=48000,atrim=end_sample=${required},asetpts=PTS-STARTPTS,astats=metadata=1:reset=0,ametadata=print:key=lavfi.astats.Overall.Number_of_samples:file='pipe\\:1'`,
+        "-ac", "2", "-ar", "48000", "-f", "null", "-"], { timeoutMs: CONTAIN_AUDIO_AUX_BUDGET.probeMs, signal });
+      if (!verifiedDecodedAudioPrefix(prefix, required)) return false;
+    }
     if (!await sameContainAudioInput(clock.identity)) return false;
     candidate = `${output}.${randomUUID()}.mp4`;
     const frames = Math.ceil(duration * 30);
