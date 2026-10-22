@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -83,4 +83,22 @@ it.skipIf(!real)("sourceOut is exclusive before fps/clone, never borrowing forbi
  const raw=ff(["-i",out,"-an","-f","rawvideo","-pix_fmt","rgb24","pipe:1"]),stride=320*320*3;
  expect(raw.length/stride).toBe(17);
  for(let f=6;f<=16;f++) {const center=f*stride+(160*320+160)*3;expect(raw[center]).toBeGreaterThan(220);expect(raw[center+2]).toBeLessThan(20);}
+},120000);
+it.skipIf(!real)("a trimmed contain export restores the source-timed audio pulse while keeping its video boundary and source bytes",async()=>{
+ const video=path.join(dir,"delayed-video.mp4"),source=path.join(dir,"delayed-av.mp4");
+ ff(["-f","lavfi","-i","color=red:s=64x64:r=30:d=0.5","-f","lavfi","-i","color=blue:s=64x64:r=30:d=1.5","-filter_complex","[0:v][1:v]concat=n=2:v=1:a=0[v]","-map","[v]","-c:v","libx264","-bf","0",video]);
+ ff(["-itsoffset","2","-i",video,"-f","lavfi","-i","aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*gte(t\\,0.5)*lt(t\\,0.52):s=44100:d=1.4","-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac",source]);
+ const original=await readFile(source),p=createEmptyProject(),id=randomUUID();sources.set(id,source);
+ p.compositionWidth=320;p.compositionHeight=320;p.compositionDurationSec=.6;
+ p.assets=[{id,kind:"video",ext:"mp4",displayName:"delayed",streamUrl:"/x",sourceDurationSec:4}];
+ p.clips=[{id:randomUUID(),trackId:p.tracks[0].id,timelineStartSec:0,durationSec:.6,layoutMode:"contain",transform:{x:.5,y:.5,scale:2},parts:[{assetId:id,sourceInSec:.1,sourceOutSec:.7}]}];
+ const before=JSON.stringify(p),job=path.join(dir,"trimmed-audio");await mkdir(job);const out=path.join(job,"out.mp4");
+ await exportCompositionToFile({project:p,jobDir:job,outputPath:out});
+ const raw=ff(["-i",out,"-an","-f","rawvideo","-pix_fmt","rgb24","pipe:1"]),stride=320*320*3;
+ expect(raw.length/stride).toBe(18);
+ for(const frame of [0,11,12,17]){const at=frame*stride+(160*320+160)*3;expect(raw[at+(frame<12?0:2)]).toBeGreaterThan(220);expect(raw[at+(frame<12?2:0)]).toBeLessThan(25);}
+ const pcm=ff(["-i",out,"-vn","-ac","1","-ar","48000","-f","s16le","pipe:1"]);
+ const rms=(start:number,end:number)=>{let energy=0;for(let n=Math.round(start*48000);n<Math.round(end*48000);n++)energy+=pcm.readInt16LE(n*2)**2;return Math.sqrt(energy/Math.round((end-start)*48000));};
+ expect(rms(.402,.418)).toBeGreaterThan(4000);expect(rms(.3,.32)).toBeLessThan(1500);expect(rms(.5,.52)).toBeLessThan(1500);
+ expect(await readFile(source)).toEqual(original);expect(JSON.stringify(p)).toBe(before);expect(await readdir(job)).toEqual(["out.mp4"]);
 },120000);

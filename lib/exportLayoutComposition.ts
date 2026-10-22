@@ -72,9 +72,10 @@ async function prepareContain(clip: MediaClip, project: EditorProject, dir: stri
     }
     if (audio) {
       const output = path.join(dir, `a${ci}-${pi}.wav`);
-      const inputArgs = asset.kind === "video" && info.hasAudio ? ["-ss", num(part.sourceInSec), "-i", info.input] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"];
+      const sourceInArg = num(part.sourceInSec);
+      const inputArgs = asset.kind === "video" && info.hasAudio ? ["-ss", sourceInArg, "-i", info.input] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"];
       await runFfmpegCommand(["-y", ...inputArgs, "-vn", "-af", "aresample=48000,apad", "-ac", "2", "-ar", "48000", "-t", num(duration), "-c:a", "pcm_s16le", output]);
-      const repaired = await repairContainAudio({ input: info.input, sourceIn: part.sourceInSec,
+      const repaired = await repairContainAudio({ input: info.input, sourceIn: part.sourceInSec, sourceInArg,
         durationArg: num(duration), descriptor: asset.kind === "video" && info.hasAudio ? info.audioSeek : null,
         oldFile: output, retryFile: path.join(dir, `a${ci}-${pi}-retry.wav`) });
       if (repaired.status !== "ineligible")

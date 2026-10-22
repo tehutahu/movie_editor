@@ -9,7 +9,7 @@ const real=process.env.RUN_FFMPEG_TESTS==="1";
 let dir:string;
 const ff=(args:string[])=>execFileSync(resolveFfmpegPath(),["-v","error",...args],{timeout:30000,maxBuffer:8*1024*1024});
 const tone="aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*gte(t\\,0.5)*lt(t\\,0.52):s=44100:d=";
-const audioArgs=(input:string,d:string,output:string,seek=true)=>["-y",...(seek?["-ss","0"]:[]),"-i",input,"-vn","-af","aresample=48000,apad","-ac","2","-ar","48000","-t",d,"-c:a","pcm_s16le",output];
+const audioArgs=(input:string,d:string,output:string,seek=true,start="0")=>["-y",...(seek?["-ss",start]:[]),"-i",input,"-vn","-af","aresample=48000,apad","-ac","2","-ar","48000","-t",d,"-c:a","pcm_s16le",output];
 const pcm=(f:string)=>ff(["-i",f,"-map","0:a:0","-f","s16le","pipe:1"]);
 beforeAll(async()=>{
  if(!real)return;dir=await mkdtemp(path.join(tmpdir(),"contain-audio-real-"));
@@ -20,12 +20,12 @@ beforeAll(async()=>{
  }
 },120000);
 afterAll(async()=>{if(dir)await rm(dir,{recursive:true,force:true});});
-async function trial(name:string,durationArg="1.4"){
- const input=path.join(dir,name+".mp4"),oldFile=path.join(dir,`${name}-${durationArg}-old.wav`),retryFile=path.join(dir,`${name}-${durationArg}-retry.wav`);
- ff(audioArgs(input,durationArg,oldFile));const oldBytes=await readFile(oldFile);
+async function trial(name:string,durationArg="1.4",sourceIn=0,sourceInArg=String(sourceIn)){
+ const input=path.join(dir,name+".mp4"),oldFile=path.join(dir,`${name}-${sourceInArg}-${durationArg}-old.wav`),retryFile=path.join(dir,`${name}-${sourceInArg}-${durationArg}-retry.wav`);
+ ff(audioArgs(input,durationArg,oldFile,true,sourceInArg));const oldBytes=await readFile(oldFile);
  const metadata=containAudioSeekFromProbe(await probeMedia(input));
  const descriptor=metadata?{...metadata,inputIdentity:await containAudioInputIdentity(input)}:null;
- const result=await repairContainAudio({input,sourceIn:0,durationArg,descriptor,oldFile,retryFile});
+ const result=await repairContainAudio({input,sourceIn,sourceInArg,durationArg,descriptor,oldFile,retryFile});
  expect(await readFile(oldFile)).toEqual(oldBytes);
  return {input,oldFile,retryFile,result,descriptor};
 }
@@ -38,6 +38,28 @@ it.skipIf(!real)("clear-short and verified-empty WAV retry exactly recovers the 
   const data=pcm(result.file);let energy=0;for(let n=24000;n<24960;n++)energy+=data.readInt16LE(n*4)**2;
   expect(Math.sqrt(energy/960)).toBeGreaterThan(4000); // fixed 0.50..0.52 pulse, not just apad length
  }
+},120000);
+it.skipIf(!real)("trimmed source ranges recover exact full-decode PCM slices including the source pulse",async()=>{
+ const input=path.join(dir,"short.mp4"),full=path.join(dir,"full.wav");
+ ff(audioArgs(input,"1.4",full,false));const fullPcm=pcm(full),sourceBytes=await readFile(input);
+ for(const [start,duration] of [["0.1","0.6"],["0.5","0.3"],["1","0.3"],["0.500001","0.05001"],["0.500010416","0.05001"],["0.500010417","0.05001"],["0.500020833","0.05001"],["0.500020834","0.05001"],["0.033333333","0.05001"]]){
+  const {result}=await trial("short",duration,Number(start),start);expect(result.status).toBe("repaired");
+  // ffmpeg parses decimal seconds by truncating to integer microseconds, then
+  // its output seek chooses the nearest 48k sample. Keep this oracle independent
+  // of the repair's coverage calculation and avoid binary decimal underflow.
+  const [whole,fraction=""]=start.split(".");
+  const micros=BigInt(whole)*BigInt(1_000_000)+BigInt(fraction.padEnd(9,"0"))/BigInt(1000);
+  const begin=Math.round(Number(micros)*48000/1_000_000),count=Math.round(Number(duration)*48000);
+  expect(result.newSamples).toBe(BigInt(count));expect(pcm(result.file)).toEqual(fullPcm.subarray(begin*4,(begin+count)*4));
+ }
+ expect(await readFile(input)).toEqual(sourceBytes);
+},120000);
+it.skipIf(!real)("healthy and origin-zero trimmed WAVs keep original bytes and uncovered ends never retry",async()=>{
+ for(const name of ["healthy","origin0"]){
+  const {oldFile,retryFile,result}=await trial(name,"0.3",.5,"0.5");
+  expect(result.status).toBe(name==="healthy"?"healthy":"ineligible");expect(result.file).toBe(oldFile);await expect(access(retryFile)).rejects.toThrow();
+ }
+ const {oldFile,retryFile,result}=await trial("short","0.3",1.2,"1.2");expect(result).toMatchObject({status:"ineligible",file:oldFile});await expect(access(retryFile)).rejects.toThrow();
 },120000);
 it.skipIf(!real)("healthy positive keeps the complete old WAV/PCM, and origin0 or true short EOF stay on legacy path",async()=>{
  for(const [name,duration] of [["healthy","1.4"],["origin0","1.4"],["short","2"]]){
