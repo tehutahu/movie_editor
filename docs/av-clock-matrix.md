@@ -136,3 +136,27 @@ ffmpeg -i negative.mkv -map 0:a:0 -vn -c:a copy -bsf:a 'setts=time_base=1/48000:
 正常AV出力、音声なし入力、短いaudio、PTS gap、未知metadata、診断失敗／予算超過、identity変更は従来bytes／成功を保持する。実無音AACは保持すべき音声trackなので、明確なtrack欠落は検知対象とする。保存DTO／source値／Undo/Redoは変更しない。
 
 自動回帰は`selectedSegmentAudio.{test,regression.test}.ts`、selected routeの非同期job test、`verify-selected-audio-loss.mjs`。検証済み早期区間だけの欠落検知であり、音声復元・一般VFR・他原点／形式・全長尺の解決とは扱わず、#72はOPENを維持する。
+
+
+## 長尺selectedの早期音声復元（基準main `d150d8d`、PR97後）
+
+PR97の厳密な欠落証拠を共有し、単一動画partのselected APIだけで限定再抽出する。
+入力全長の制限を広げず、必要な音声prefixが240,000samples（5秒）以内、選択窓が48,000samples（1秒）以内、旧MP4と完成候補が各1MiB以下の場合だけ試す。
+元のvideo-only出力が原点0で、time baseと全video packetのPTS/DTS/duration/size/SHA256を取得できることも必要。
+長尺の全packet診断を新たに許可せず、共有stretch／multipart／compositionへ適用しない。
+
+候補は旧出力のvideoをcopyし、元入力の音声を48kHz化・整数sampleでatrimしてAAC stereoへ再圧縮する。
+無音追加やasync resamplingはしない。AACへの出力frame数制限はprimingで末尾を落とす反例があるので使用せず、整数末尾と有限出力時間でflushする。
+movie timescaleも48000として、古いprobe4を含め候補audioの原点0・正確なduration_tsを要求する。
+再probeの2stream／AAC-LC48k stereoに加え、旧videoの全packet時計・payload完全一致、候補音声の実decoded sample被覆・PTS連続性を確認する。
+抽出前からのinput identity・旧output identity・candidate identityと取消を採用直前に再確認し、atomic renameする。
+
+診断は既存各5秒、候補生成は30秒、stdout/stderr合計1MiB、TERM猶予1秒。
+一度だけ作る候補にも-fs1MiBを設定するが、このFFmpeg上限はpacket／moov分の一時超過があり得るため、完成実サイズでも1MiB以内を確認する。
+失敗・不一致・超過・入力差替えは候補を清掃し、既知欠落のエラーを維持する。取消とprocess清掃不明は伝播し、候補unlink失敗も成功へ戻さない。
+正常／未知出力は候補を作らず旧bytesを保持する。保存DTO／UndoRedo／元媒体／共有出力は変更しない。
+
+独立した期待音声は、固定300秒素材の全復号f32 PCMをディスクへ保存し、固定sample indexから選択窓だけを読み、製品のseek formatter／atrim／-ss／-tを使わず別AACへencodeする。
+monoのsource0／.1／1/30／.499999／.5／.500001、stereoの1600／1601／1602／1603／47999／48000sample窓を検証する。probe4の1600〜1603は実測durationの境界としてmissing／unchangedと旧bytes保持を検査し、それ以外は復元音声を全decodeしてbyte照合する。旧video全packetの不変も確認する。古いprobeでは旧MP4の522ticksが候補の512ticksへ再解釈されるため、終了時刻の延長では解消せず、一致gateを緩めない。
+これはテスト用の既知300秒素材だけのfull decodeであり、製品処理は先頭の限られた音声だけを復号する。
+一般VFR、長尺後半、1秒超の選択、他形式／原点、multipart／composition全般の修復ではなく、#72はOPEN。

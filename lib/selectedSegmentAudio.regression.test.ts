@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { extractSegmentTimes, probeMedia, resolveFfmpegPath } from "./ffmpeg";
+import { extractSegmentTimes, probeMedia, resolveFfmpegPath, resolveFfprobePath } from "./ffmpeg";
 import { extractEditorSegment, repairSourceAvSegment } from "./sourceAvClock";
 import { containAudioInputIdentity } from "./containAudioRepair";
-import { hasProvenSelectedAudioLoss } from "./selectedSegmentAudio";
+import { hasProvenSelectedAudioLoss, recoverSelectedSegmentAudio } from "./selectedSegmentAudio";
 import { exportCompositionToFile } from "./exportComposition";
 import { createEmptyProject } from "./editor/project";
 import type { Asset, MediaClip } from "./editor/types";
@@ -14,10 +14,12 @@ import type { Asset, MediaClip } from "./editor/types";
 const sources = vi.hoisted(() => new Map<string, string>());
 vi.mock("@/lib/assetResolve", () => ({ resolveAssetInputPath: async (asset: Asset) => sources.get(asset.id) ?? null }));
 const real = process.env.RUN_FFMPEG_TESTS === "1";
-let dir: string, normal: string, positive: string, gap: string, silent: string, short: string, noaudio: string;
+let dir: string, normal: string, positive: string, gap: string, silent: string, short: string, noaudio: string, stereo: string;
+let probe4 = false;
 const ff = (args: string[]) => execFileSync(resolveFfmpegPath(), ["-v", "error", "-y", ...args], { maxBuffer: 16 * 1024 * 1024 });
 beforeAll(async () => {
   if (!real) return;
+  probe4 = /^ffprobe version 4\./.test(execFileSync(resolveFfprobePath(), ["-version"], { encoding: "utf8" }));
   dir = await mkdtemp(path.join(tmpdir(), "selected-audio-loss-"));
   normal = path.join(dir, "normal.mp4"); positive = path.join(dir, "positive.mp4");
   gap = path.join(dir, "gap.mp4"); silent = path.join(dir, "silent.mp4"); short = path.join(dir, "short.mp4"); noaudio = path.join(dir, "noaudio.mp4");
@@ -30,6 +32,17 @@ beforeAll(async () => {
     ff(["-i", normal, "-itsoffset", "2", "-f", "lavfi", "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", output]);
   }
   ff(["-i", normal, "-an", "-c:v", "copy", noaudio]);
+  stereo = path.join(dir, "stereo.mp4");
+  ff(["-i", normal, "-itsoffset", "2", "-f", "lavfi", "-i", "aevalsrc=0.08*sin(2*PI*440*t)|0.05*sin(2*PI*660*t):s=48000:d=300",
+    "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", stereo]);
+  // Independent full-decode oracle, on disk rather than a 115MB PCM Buffer.
+  // This is a fixed 300s test fixture, never a production full-source decode.
+  for (const [name, input] of [["mono", positive], ["stereo", stereo]]) {
+    const pcm = path.join(dir, name + "-full.pcm");
+    ff(["-xerror", "-i", input, "-map", "0:a:0", "-vn", "-ac", "2", "-ar", "48000", "-f", "f32le", pcm]);
+    expect((await stat(pcm)).size).toBeGreaterThanOrEqual(300 * 48000 * 8);
+    expect((await stat(pcm)).size).toBeLessThan(301 * 48000 * 8);
+  }
 }, 60000);
 afterAll(async () => { if (dir) await rm(dir, { recursive: true, force: true }); });
 
@@ -76,4 +89,60 @@ it.skipIf(!real)("normal gain-zero composition still succeeds without invoking s
   const outputPath = path.join(jobDir, "output.mp4"); await exportCompositionToFile({ project, jobDir, outputPath });
   expect((await probeMedia(outputPath)).streams?.some(s => s.codec_type === "video")).toBe(true);
   expect(JSON.stringify(project)).toBe(saved);
+}, 30000);
+
+const fixedFirst = new Map([[0, 0], [.1, 4800], [1 / 30, 1600], [.499999, 24000], [.5, 24000], [.500001, 24000]]);
+function videoProof(file: string) {
+  const raw = JSON.parse(execFileSync(resolveFfprobePath(), ["-v", "error", "-select_streams", "v:0", "-show_packets",
+    "-show_entries", "packet=pts,dts,duration,size,data_hash", "-show_data_hash", "sha256", "-of", "json", file], { encoding: "utf8", maxBuffer: 1024 * 1024 }));
+  return raw.packets;
+}
+async function recoveredOracle(input: string, name: string, start: number, count: number) {
+  const first = fixedFirst.get(start); if (first === undefined) throw Error("Missing fixed sample oracle");
+  const output = path.join(dir, `recovered-${name}-${start}-${count}.mp4`), inputIdentity = await containAudioInputIdentity(input);
+  await extractSegmentTimes({ inputPath: input, outputPath: output, startSec: start, endSec: start + count / 48000 });
+  const beforeVideo = videoProof(output), sourceBytes = await readFile(input);
+  expect((await probeMedia(output)).streams?.map(s => s.codec_type)).toEqual(["video"]);
+  const before = await readFile(output);
+  const outcome = await recoverSelectedSegmentAudio({ input, output, start, end: start + count / 48000, inputIdentity });
+  if (probe4 && name === "stereo" && count <= 1603) {
+    // Probe4 interprets the original movie/edit timescale differently. Preserve
+    // the strict gates rather than calling these one-frame cases recovered.
+    if (count <= 1601) {
+      expect(String(beforeVideo[0].duration)).toBe("522"); expect(outcome).toBe("missing");
+    } else {
+      expect(Number((await probeMedia(output)).streams![0].duration)).toBeGreaterThan(count / 48000 + 1 / 30);
+      expect(outcome).toBe("unchanged");
+    }
+    expect((await readFile(output)).equals(before)).toBe(true); expect(videoProof(output)).toEqual(beforeVideo);
+    expect((await readFile(input)).equals(sourceBytes)).toBe(true);
+    return;
+  }
+  expect(outcome).toBe("repaired");
+  expect(videoProof(output)).toEqual(beforeVideo); expect((await readFile(input)).equals(sourceBytes)).toBe(true);
+  const raw = path.join(dir, `oracle-${name}-${start}-${count}.pcm`), oracle = raw + ".m4a", selected = Buffer.alloc(count * 8);
+  const full = await open(path.join(dir, name + "-full.pcm"), "r");
+  try { expect((await full.read(selected, 0, selected.length, first * 8)).bytesRead).toBe(selected.length); } finally { await full.close(); }
+  await writeFile(raw, selected);
+  // No production seek formatter, atrim, -ss or -t in this reference encoder.
+  ff(["-f", "f32le", "-ac", "2", "-ar", "48000", "-i", raw, "-c:a", "aac", "-movie_timescale", "48000", oracle]);
+  const decode = (file: string) => ff(["-xerror", "-i", file, "-vn", "-ac", "2", "-ar", "48000", "-f", "s16le", "pipe:1"]);
+  expect(decode(output).equals(decode(oracle))).toBe(true);
+  const audio = (await probeMedia(output)).streams!.find(s => s.codec_type === "audio")!;
+  expect(audio.start_time).toBe("0.000000"); expect(String(audio.duration_ts)).toBe(String(count));
+}
+it.skipIf(!real).each([...fixedFirst.keys()])("recovers the bounded mono window at source %s against independent fixed PCM/AAC", async start => {
+  await recoveredOracle(positive, "mono", start, 28800);
+}, 30000);
+it.skipIf(!real).each([1600, 1601, 1602, 1603, 47999, 48000])("stereo %s samples recover or preserve the explicit probe4 rounding boundary", async count => {
+  await recoveredOracle(stereo, "stereo", count === 1600 ? 0 : .1, count);
+}, 30000);
+it.skipIf(!real)("healthy, gap, short, noaudio and oversized windows retain the old result and exact bytes", async () => {
+  for (const input of [normal, gap, short, noaudio]) {
+    const p = await oldOutput(input, "recovery-control-" + path.basename(input)), before = await readFile(p.output);
+    expect(await recoverSelectedSegmentAudio(p)).toBe("unchanged"); expect(await readFile(p.output)).toEqual(before);
+  }
+  const p = await oldOutput(positive, "too-long"), output = path.join(dir, "too-long-window.mp4");
+  await extractSegmentTimes({ inputPath: positive, outputPath: output, startSec: .1, endSec: 1.2 }); const before = await readFile(output);
+  expect(await recoverSelectedSegmentAudio({ ...p, output, end: 1.2 })).toBe("missing"); expect(await readFile(output)).toEqual(before);
 }, 30000);

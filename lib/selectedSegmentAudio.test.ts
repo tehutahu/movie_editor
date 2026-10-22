@@ -44,7 +44,7 @@ it("proves missing audio with bounded prefix diagnostics and pre-extraction iden
   expect(args[args.indexOf("-frames:a") + 1]).toBe("2");
   expect(args[args.indexOf("-af") + 1]).toContain("atrim=end_sample=1600");
   expect(args[args.indexOf("-af") + 1]).not.toMatch(/apad|async=/);
-  expect(options).toEqual({ timeoutMs: CONTAIN_AUDIO_AUX_BUDGET.probeMs });
+  expect(options).toEqual({ timeoutMs: CONTAIN_AUDIO_AUX_BUDGET.probeMs, signal: undefined });
   expect(mocks.same).toHaveBeenCalledTimes(3);
 });
 
