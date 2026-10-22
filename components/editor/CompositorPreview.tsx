@@ -26,6 +26,7 @@ import {
 import type { ActiveClipLayer, TransformHandle } from "@/lib/editor/compositor";
 import type { ClipTransform } from "@/lib/editor/types";
 import { mediaLayoutKey, validateBrowserMediaLayouts, type MediaLayout } from "@/lib/editor/mediaLayoutClient";
+import { createPreviewVideoClock } from "@/lib/editor/previewVideoClock";
 import type { Asset } from "@/lib/editor/types";
 import { createPreviewFrames } from "@/lib/editor/previewFrames";
 import { parseExactSeek } from "@/lib/editor/exactSeek";
@@ -198,6 +199,7 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   isPlayingRef.current = isPlaying;
   const framesRef = useRef<ReturnType<typeof createPreviewFrames> | null>(null);
   const mediaListenersRef = useRef<Map<HTMLVideoElement | HTMLImageElement, () => void>>(new Map());
+  const videoClocksRef = useRef(new WeakMap<HTMLVideoElement, ReturnType<typeof createPreviewVideoClock>>());
   const playRafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
 
@@ -451,10 +453,13 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
         }
         // Images emit load (not loadeddata), including when already cached.
         // Register before src so readiness cannot race listener installation.
-        const events = el instanceof HTMLVideoElement ? ["loadeddata", "seeked"] : ["load"];
+        const clock = el instanceof HTMLVideoElement ? createPreviewVideoClock(el, requestDraw) : undefined;
+        if (el instanceof HTMLVideoElement && clock) videoClocksRef.current.set(el, clock);
+        const events = el instanceof HTMLVideoElement ? ["loadeddata", "seeked", "durationchange"] : ["load"];
         for (const event of events) el.addEventListener(event, requestDraw);
         const media = el;
         mediaListenersRef.current.set(media, () => {
+          clock?.dispose();
           for (const event of events) media.removeEventListener(event, requestDraw);
         });
         pool.set(key, el);
@@ -497,29 +502,35 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
   const drawRef = useRef<(() => void) | null>(null);
 
   const syncVideoTime = useCallback((media: HTMLVideoElement, targetSec: number, playing: boolean) => {
+    const seek = () => {
+      const clock = videoClocksRef.current.get(media);
+      if (clock) clock.seek(targetSec);
+      else media.currentTime = targetSec;
+    };
     if (playing) {
       if (media.paused) {
         if (Math.abs(media.currentTime - targetSec) > 0.05) {
-          media.currentTime = targetSec;
+          seek();
         }
         void media.play().catch(() => undefined);
         return;
       }
       if (Math.abs(media.currentTime - targetSec) > 0.35) {
-        media.currentTime = targetSec;
+        seek();
       }
       return;
     }
 
     if (!media.paused) media.pause();
     if (Math.abs(media.currentTime - targetSec) > 0.02) {
-      media.currentTime = targetSec;
+      seek();
     }
   }, []);
 
   const canDrawMedia = useCallback((media: HTMLVideoElement | HTMLImageElement): boolean => {
     if (media instanceof HTMLVideoElement) {
       return (
+        videoClocksRef.current.get(media)?.target(0) != null &&
         !media.seeking &&
         media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
         media.videoWidth > 0
@@ -537,7 +548,11 @@ export function CompositorPreview({ editor }: { editor: EditorStore }) {
     const playing = isPlayingRef.current;
     for (const layer of layers) {
       const media = ensureMedia(layer);
-      if (media instanceof HTMLVideoElement) syncVideoTime(media, layer.sourceTimeSec, playing);
+      if (media instanceof HTMLVideoElement) {
+        const target = videoClocksRef.current.get(media)?.target(layer.sourceTimeSec);
+        // play() on an ended video can rewind it; hold the decoded EOF frame.
+        if (target != null) syncVideoTime(media, target, playing && target < media.duration);
+      }
     }
     for (const [key, media] of mediaPoolRef.current) {
       if (media instanceof HTMLVideoElement && (!playing || !activeKeys.has(key)) && !media.paused) media.pause();

@@ -48,6 +48,7 @@ hooks/
   useEditorStore.ts       → NLE state, jobs, keyboard shortcuts
   legacy/useEditorState.ts → legacy segment editor (unused)
 lib/editor/               → project model, clip ops, compositor, commands
+lib/editor/previewVideoClock.ts → per-video measured HTML clock; saved source times stay relative
 lib/projectStorage.ts     → atomic save/load, SHA-256 validation, candidate protection
 lib/editor/projectDocument.ts → versioned persistence DTO and bounded validation
 lib/storage/              → media storage driver + local filesystem helpers
