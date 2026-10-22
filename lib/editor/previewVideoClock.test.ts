@@ -71,3 +71,21 @@ it("never retries normal zero-origin seeks or large native clamps", () => {
   video.dispatchEvent(new Event("seeked"));
   expect(video.currentTime).toBe(.999999);
 });
+it("uses a late verified video origin only when the HTML AV clock calibrated to zero", () => {
+  const { video, clock, invalidate } = setup(); video.duration = 4;
+  video.dispatchEvent(new Event("loadedmetadata")); video.dispatchEvent(new Event("seeked"));
+  expect(clock.target(.5)).toBe(.5);
+  clock.setVerifiedVideoOrigin(2);
+  expect(clock.target(.5)).toBe(2.5); expect(invalidate).toHaveBeenCalledTimes(2);
+  clock.seek(2.5); video.currentTime = 2.499999; video.dispatchEvent(new Event("seeked"));
+  expect(video.currentTime).toBe(2.500001);
+  clock.dispose(); clock.setVerifiedVideoOrigin(3); expect(invalidate).toHaveBeenCalledTimes(2);
+});
+it("never double-adds a video origin already measured by the browser", () => {
+  const { video, clock } = setup(); video.duration = 4;
+  clock.setVerifiedVideoOrigin(2);
+  video.dispatchEvent(new Event("loadedmetadata")); video.currentTime = 2; video.dispatchEvent(new Event("seeked"));
+  expect(clock.target(.5)).toBe(2.5);
+  for (const unknown of [null, undefined, "2", NaN, Infinity, -1, 0]) clock.setVerifiedVideoOrigin(unknown);
+  expect(clock.target(.5)).toBe(2.5);
+});

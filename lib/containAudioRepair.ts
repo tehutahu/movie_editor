@@ -33,6 +33,19 @@ function timeBase(value: unknown): Rational | null {
   return { n: BigInt(m[1]), d: BigInt(m[2]) };
 }
 export type ContainAudioSeek = { audioDuration: Rational; inputIdentity?: { file: string; stat: Stats } };
+/** Shared strict duration/coverage for optional AV diagnostics. Keep arithmetic
+ * rational until both endpoints have been conservatively quantized to µs. */
+export function verifiedClockDuration(stream: { duration_ts?: number | string; duration?: string; time_base?: string }): Rational | null {
+  const ticks = integer(stream.duration_ts), tb = timeBase(stream.time_base), text = decimal(stream.duration);
+  if (ticks === null || ticks <= BigInt(0) || !tb || !text || text.n <= BigInt(0)) return null;
+  const duration = mul({ n: ticks, d: BigInt(1) }, tb);
+  return compare(abs(sub(duration, text)), tb) <= BigInt(0) ? duration : null;
+}
+export function verifiedClockRangeCovered(limit: Rational, startArg: string, durationArg: string): boolean {
+  const start = decimal(startArg), duration = decimal(durationArg);
+  if (!start || start.n < BigInt(0) || !duration || duration.n <= BigInt(0)) return false;
+  return compare(limit, add(ceilMicros(start), ceilMicros(duration))) >= BigInt(0);
+}
 export async function containAudioInputIdentity(file: string) {
   try { const stat = await lstat(file); return stat.isFile() ? { file, stat } : undefined; } catch { return undefined; }
 }
