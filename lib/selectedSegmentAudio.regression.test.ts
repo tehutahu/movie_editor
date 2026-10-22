@@ -23,7 +23,7 @@ beforeAll(async () => {
   dir = await mkdtemp(path.join(tmpdir(), "selected-audio-loss-"));
   normal = path.join(dir, "normal.mp4"); positive = path.join(dir, "positive.mp4");
   gap = path.join(dir, "gap.mp4"); silent = path.join(dir, "silent.mp4"); short = path.join(dir, "short.mp4"); noaudio = path.join(dir, "noaudio.mp4");
-  ff(["-f", "lavfi", "-i", "color=blue:s=64x64:r=30:d=300", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=300",
+  ff(["-f", "lavfi", "-i", "color=blue:s=64x64:r=30:d=300", "-f", "lavfi", "-i", "aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*gte(t\\,0.5)*lt(t\\,0.52):s=48000:d=300",
     "-c:v", "libx264", "-preset", "ultrafast", "-g", "60", "-bf", "0", "-c:a", "aac", normal]);
   ff(["-copyts", "-i", normal, "-itsoffset", "2", "-i", normal, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-avoid_negative_ts", "disabled", positive]);
   ff(["-copyts", "-i", positive, "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", "-bsf:a",
@@ -33,7 +33,7 @@ beforeAll(async () => {
   }
   ff(["-i", normal, "-an", "-c:v", "copy", noaudio]);
   stereo = path.join(dir, "stereo.mp4");
-  ff(["-i", normal, "-itsoffset", "2", "-f", "lavfi", "-i", "aevalsrc=0.08*sin(2*PI*440*t)|0.05*sin(2*PI*660*t):s=48000:d=300",
+  ff(["-i", normal, "-itsoffset", "2", "-f", "lavfi", "-i", "aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*gte(t\\,0.5)*lt(t\\,0.52)|0.02*sin(2*PI*660*t)+0.25*sin(2*PI*3000*t)*gte(t\\,0.8)*lt(t\\,0.82):s=48000:d=300",
     "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", stereo]);
   // Independent full-decode oracle, on disk rather than a 115MB PCM Buffer.
   // This is a fixed 300s test fixture, never a production full-source decode.
@@ -127,7 +127,14 @@ async function recoveredOracle(input: string, name: string, start: number, count
   // No production seek formatter, atrim, -ss or -t in this reference encoder.
   ff(["-f", "f32le", "-ac", "2", "-ar", "48000", "-i", raw, "-c:a", "aac", "-movie_timescale", "48000", oracle]);
   const decode = (file: string) => ff(["-xerror", "-i", file, "-vn", "-ac", "2", "-ar", "48000", "-f", "s16le", "pipe:1"]);
-  expect(decode(output).equals(decode(oracle))).toBe(true);
+  const actual = decode(output); expect(actual.equals(decode(oracle))).toBe(true);
+  if (name === "mono" && start === .1 && count === 28800) {
+    const rms = (a: number, b: number) => {
+      let sum = 0; for (let n = Math.round(a * 48000); n < Math.round(b * 48000); n++) sum += actual.readInt16LE(n * 4) ** 2;
+      return Math.sqrt(sum / Math.round((b - a) * 48000));
+    };
+    expect(rms(.426, .436)).toBeGreaterThan(4000); expect(rms(.2, .22)).toBeLessThan(1500);
+  }
   const audio = (await probeMedia(output)).streams!.find(s => s.codec_type === "audio")!;
   expect(audio.start_time).toBe("0.000000"); expect(String(audio.duration_ts)).toBe(String(count));
 }

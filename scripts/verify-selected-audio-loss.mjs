@@ -26,7 +26,7 @@ async function load(doc, name) {
   await page.locator('.timeline-clip').click();
 }
 (async () => {
-  ff(['-y', '-f', 'lavfi', '-i', 'color=blue:s=64x64:r=30:d=300', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=300',
+  ff(['-y', '-f', 'lavfi', '-i', 'color=blue:s=64x64:r=30:d=300', '-f', 'lavfi', '-i', 'aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*gte(t\\,0.5)*lt(t\\,0.52):s=48000:d=300',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '60', '-bf', '0', '-c:a', 'aac', `${evidence}/normal.mp4`]);
   ff(['-y', '-copyts', '-i', `${evidence}/normal.mp4`, '-itsoffset', '2', '-i', `${evidence}/normal.mp4`,
     '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-avoid_negative_ts', 'disabled', `${evidence}/positive.mp4`]);
@@ -78,7 +78,12 @@ async function load(doc, name) {
       await page.waitForFunction(() => !document.querySelector('.busy-banner'));
       if (name === 'positive') {
         const decode = file => ff(['-xerror', '-i', file, '-vn', '-ac', '2', '-ar', '48000', '-f', 's16le', 'pipe:1']);
-        assert.deepEqual(decode(out), decode(expected));
+        const actual = decode(out); assert.deepEqual(actual, decode(expected));
+        const rms = (a, b) => {
+          let sum = 0; for (let n = Math.round(a * 48000); n < Math.round(b * 48000); n++) sum += actual.readInt16LE(n * 4) ** 2;
+          return Math.sqrt(sum / Math.round((b - a) * 48000));
+        };
+        assert(rms(.426, .436) > 4000); assert(rms(.2, .22) < 1500);
         assert.equal(probe.streams[0].width, 64); assert.equal(probe.streams[0].height, 64);
         await captureEvidenceScreenshot(page, `${evidence}/recovered-audio.png`);
         check('bounded positive-audio download matches independent fixed PCM/AAC and keeps native video dimensions');
