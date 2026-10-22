@@ -34,6 +34,8 @@ jobs:
 
       - name: Install media and browser dependencies
         run: |
+          sudo "$(command -v node)" scripts/configure-ci-apt.mjs /etc/apt/apt-mirrors.txt /etc/apt/apt.conf.d/zzz-movie-editor-network /etc/apt/sources.list.d/ubuntu.sources
+          apt-config dump | sed -n '/^Acquire::Retries /p; /^Acquire::http::Timeout /p; /^Acquire::https::Timeout /p'
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           npx playwright install --with-deps chromium
