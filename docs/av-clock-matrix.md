@@ -160,3 +160,24 @@ movie timescaleも48000として、古いprobe4を含め候補audioの原点0・
 monoのsource0／.1／1/30／.499999／.5／.500001、stereoの1600／1601／1602／1603／47999／48000sample窓を検証する。probe4の1600〜1603は実測durationの境界としてmissing／unchangedと旧bytes保持を検査し、それ以外は復元音声を全decodeしてbyte照合する。旧video全packetの不変も確認する。古いprobeでは旧MP4の522ticksが候補の512ticksへ再解釈されるため、終了時刻の延長では解消せず、一致gateを緩めない。
 これはテスト用の既知300秒素材だけのfull decodeであり、製品処理は先頭の限られた音声だけを復号する。
 一般VFR、長尺後半、1秒超の選択、他形式／原点、multipart／composition全般の修復ではなく、#72はOPEN。
+
+## 長尺後半とmultipartの正常対照・未修復例（基準main `fa4f0b0`、PR98後）
+
+一フレームのedit list丸め正規化は判断待ちのため変更しない。次の追加は再現検証だけで、製品の修復条件・予算・保存値・Undo/Redoを変更しない。
+
+固定300秒／64×64／CFR30青映像とAAC48kHz音声を使い、音声にはsource .5〜.52秒と250.5〜250.52秒に非周期pulseを置く。原点0の正常対照と、AACを2秒offsetしてcopy muxした実video0/audio1.978/format0の素材を比較する。表示frameは全18枚の固定青を検査する。この色検査だけでpart所有者を識別したとは扱わない。
+
+| 経路・素材 | 固定期待音声 | 現在の実結果／分類 |
+| --- | --- | --- |
+| 単一selected、原点0、source250.1〜250.7 | pulse .40〜.42秒、quiet .20〜.22秒 | AV両stream／期待窓正常、旧bytes保持 |
+| 単一selected、正audio原点、同区間 | 全source復号先頭を0とするためAAC primingを含むpulse約.421333〜.441333秒 | AV両streamでも期待窓にpulseなし。音声内容の時計が未修復であり、track欠落検知とは別問題 |
+| multipart原点0の2parts、.1〜.4＋.4〜.7 | 後続partのpulseはclip .40〜.42秒 | 全18frames正常、audio29696samples、期待窓正常 |
+| multipart正audio原点の先頭part＋正常後続part、同区間 | 後続の正常pulseもclip .40〜.42秒 | 全18frames正常だがaudio15360samplesへ短縮。pulseが.10〜.12秒へ前倒し、期待窓はaudio EOF後 |
+
+長尺後半の独立期待音声は、既存テスト用full f32 PCMの固定sample index **12,004,800**（250.1×48000）から**28,800**samplesをディスクで読み、製品のseek formatter／metadata offset／atrim／-ss／-tなしで参照AACをencodeする。固定窓.426〜.436秒の参照pulseを確認してから実出力と比較する。normal対照は固定.405〜.415秒、quietは.20〜.22秒。pulse位置を探索して期待時刻をfitしない。full decodeは固定fixtureのテスト専用で、製品へ追加しない。
+
+multipartは既存selectedの零起点`renderClipToFile`経路を直接再現する。音声が抽出できなかったpartをconcat対象から省く既存処理により、後続の正常音声まで0.3秒前へ詰まる。未修復例の.405〜.415秒はEOF後なので、ゼロ埋めで「無音」と判定せず、明示した実sample数と前倒し窓.105〜.115秒を確認する。正常対照では同じ前倒し窓はquietである。source bytes／project DTOの不変、全18frames、補助partファイル清掃も検査する。
+
+自動再現は`lib/selectedSegmentAudio.regression.test.ts`の`documents unresolved late...`と`documents multipart...`。これらの成功は**現在の正常／異常を区別できた**という意味で、異常側の音声が直ったという意味ではない。別担当の独立fixtureでもsystem7.1／同梱7.0+probe4／隔離6.1の3系統で同じmultipart短縮・前倒しを確認した。
+
+長尺後半は両stream存在で既存修復の入口に入らず、先頭prefixの上限を増やしてもこの症状の安全な解決にはならない。multipartへの無音補完／欠落エラー化／新しい音声格子の導入も既存の「ゼロ復号音声を空のまま保つ」扱いを変える。今回はこれらの意味を変更せず、修復方針の判断事項として残す。一般VFR、multipart全般、他原点／形式、長尺全般を解決済みにしない。
