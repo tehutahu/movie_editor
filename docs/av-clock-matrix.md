@@ -181,3 +181,17 @@ multipartは既存selectedの零起点`renderClipToFile`経路を直接再現す
 自動再現は`lib/selectedSegmentAudio.regression.test.ts`の`documents unresolved late...`と`documents multipart...`。これらの成功は**現在の正常／異常を区別できた**という意味で、異常側の音声が直ったという意味ではない。別担当の独立fixtureでもsystem7.1／同梱7.0+probe4／隔離6.1の3系統で同じmultipart短縮・前倒しを確認した。
 
 長尺後半は両stream存在で既存修復の入口に入らず、先頭prefixの上限を増やしてもこの症状の安全な解決にはならない。multipartへの無音補完／欠落エラー化／新しい音声格子の導入も既存の「ゼロ復号音声を空のまま保つ」扱いを変える。今回はこれらの意味を変更せず、修復方針の判断事項として残す。一般VFR、multipart全般、他原点／形式、長尺全般を解決済みにしない。
+
+## multipartの実音声復元と残る判断（基準main `79ad1e8`、PR99後）
+
+PR99の早期・短区間の前倒しには、無音補完やエラー化を伴わない局所対処がある。`renderClipToFile`が元音声をmapするpart抽出後、concat／gain／fade／音声track選択の前だけ、既存の正audio原点MP4用の音声復元を使う。最終合成の音声欠落を診断してmuteを解除することはしない。
+
+実音声が欠けたpartに対し、抽出前input identity、既存strict family、連続decoded-prefix、元映像の全packet時計／payload一致を証明できた場合だけ復元する。既存の選択窓1秒／音声先頭5秒／旧出力・候補各1MiB／各診断5秒・候補30秒・TERM1秒を維持する。正常partには追加subprocessを起動しない。早い短区間の音声付き動画partに限り、抽出前identityのstatを追加する。
+
+診断を含む追加試行は**1書き出しジョブ全体で最大1回**。通常stretchでもcontain混在時のstretchでも全clipで同じ予算を共有し、part数／clip数に比例して候補試行を増やさない。直接part rendererを使う単独処理も1回だけ。最大追加処理は既存helperの8process（診断7×各5秒＋生成30秒、各TERM猶予1秒）で、一般的な処理時間の保証ではない。失敗／未知／予算消費後は既存empty-audio結果を保持し、新しい無音やエラーを作らない。
+
+固定正常対照は旧経路とのMP4全bytes一致を検査する。復元対象では音声29696samplesと後続pulse.405〜.415秒、.105〜.115秒のquiet、全18frames、元bytes/DTO/清掃を検査する。gain0の全体書き出しも復元後に全PCMが0であることを確認する。予算消費済みの対照は旧15360samples／pulse前倒しの未修復結果を明示して保持する。旧PR99節の異常結果は修正前の再現記録で、今回直るのはこの検証済み小範囲だけ。
+
+長尺後半は別問題。AV両trackが存在する旧出力は現在bytes優先なので、**「既知の音声時計ずれを別途証明できれば、両track存在でも音声を置き換えてよいか」**が判断点になる。許可しても既存5秒／1MiB内の局所seek・packet/decoder連続性の新しい証明が必要で、無制限full decodeや上限拡大を選ばない。現時点で安全な一般修復が完成したとは主張しない。
+
+残るmultipartの失敗時には、(1)現状維持（互換性・追加コスト最小だが欠落／前倒しが残る）、(2)証明済み欠落だけjob error（不完全なDLを防ぐが従来成功が失敗へ変わる）、(3)欠落区間を無音で保持（後続時刻を守るが元音声は戻らず、音声長／bytesが変わる）という選択がある。今回は成功した実音声復元だけ追加し、この方針は変更しない。表示時刻正規化も引き続き保留する。

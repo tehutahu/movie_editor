@@ -1,6 +1,7 @@
 /** Selected-source downloads retain the source audio, including silent tracks.
  * Diagnosis and bounded early-window recovery apply to one known family only,
- * never to composition renders, where muting may intentionally drop audio. */
+ * on selected downloads or source parts before composition gain/track choice.
+ * Never diagnose final composition renders, where muting may drop audio. */
 import { randomUUID } from "node:crypto";
 import { rename, unlink } from "node:fs/promises";
 import { resolveFfmpegPath, resolveFfprobePath, type FfProbeJson } from "./ffmpeg";
@@ -118,7 +119,7 @@ async function videoPackets(file: string, signal?: AbortSignal): Promise<string 
   return JSON.stringify(packets);
 }
 
-/** Selected API only. Reuse the proven-loss diagnosis once; every recovery
+/** Selected API or pre-gain source part only. Reuse proven loss once; every recovery
  * failure retains its missing status, never publishes an unverified candidate. */
 export async function recoverSelectedSegmentAudio(params: SelectedAudioLossParams): Promise<"unchanged" | "repaired" | "missing"> {
   const snapshot = { ...params };

@@ -97,6 +97,7 @@ async function prepareContain(clip: MediaClip, project: EditorProject, dir: stri
 }
 
 export async function exportLayoutCompositionToFile(params: { project: EditorProject; jobDir: string; outputPath: string; onProgress?: (pct: number) => void }): Promise<void> {
+  const sourceAudioRecoveryBudget = { remaining: 1 };
   const { project, outputPath } = params, duration = project.compositionDurationSec;
   const dir = await mkdtemp(path.join(params.jobDir, "layout-"));
   let succeeded = false;
@@ -114,7 +115,7 @@ export async function exportLayoutCompositionToFile(params: { project: EditorPro
       else {
         // Mixed projects keep existing stretch source normalization and geometry.
         const file = path.join(dir, `stretch${ci}.mp4`);
-        await renderClipToFile({ clip, assets: project.assets, jobDir: dir, outputPath: file, width: project.compositionWidth, height: project.compositionHeight });
+        await renderClipToFile({ clip, assets: project.assets, jobDir: dir, outputPath: file, width: project.compositionWidth, height: project.compositionHeight, sourceAudioRecoveryBudget });
         prepared.push({ file, clip, audio, matte: false, rect: rectFor(clip, project) });
       }
     }

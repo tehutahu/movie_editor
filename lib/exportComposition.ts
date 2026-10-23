@@ -65,6 +65,7 @@ async function prepareCompositionClips(
   const sorted = titleDir ? visualClipsForExport(project).map(clip=>({clip})) : clipsForExportComposition(project);
   const prepared: PreparedClip[] = [];
   let partIndex = 0;
+  const sourceAudioRecoveryBudget = { remaining: 1 };
 
   for (const { clip } of sorted) {
     if (clip.kind === "title") {
@@ -75,7 +76,7 @@ async function prepareCompositionClips(
     }
     const rendered = path.join(jobDir, `part_${partIndex++}.mp4`);
     await renderClipToFile({ clip, assets: project.assets, jobDir,
-      outputPath: rendered, width: compW, height: compH });
+      outputPath: rendered, width: compW, height: compH, sourceAudioRecoveryBudget });
 
     prepared.push({
       path: rendered,

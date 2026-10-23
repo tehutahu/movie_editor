@@ -45,19 +45,29 @@ async function load(doc, name) {
   await page.waitForFunction(() => document.querySelectorAll('.asset-card').length === 3 && !document.querySelector('.asset-library input').disabled);
   await dragToVisibleTarget(page, page.locator('.asset-card').first(), page.locator('.timeline-track-row').last(), { targetPosition: { x: 48, y: 30 } });
   await page.locator('.timeline-clip').waitFor(); const template = await save();
-  for (const name of ['positive', 'positive-wide', 'normal', 'noaudio']) {
+  for (const name of ['positive', 'positive-wide', 'normal', 'noaudio', 'multipart']) {
+    const multi = name === 'multipart';
     const missing = name === 'positive-wide', duration = missing ? 1.1 : .6, end = missing ? 1.2 : .7;
     const doc = structuredClone(template);
     Object.assign(doc.project, { compositionWidth: 320, compositionHeight: 320, compositionDurationSec: duration });
     Object.assign(doc.project.clips[0], { timelineStartSec: 0, durationSec: duration, transform: { x: .5, y: .5, scale: 1 } });
-    Object.assign(doc.project.clips[0].parts[0], { assetId: doc.project.assets.find(a => a.displayName === (missing ? 'positive' : name)).id, sourceInSec: .1, sourceOutSec: end });
+    Object.assign(doc.project.clips[0].parts[0], { assetId: doc.project.assets.find(a => a.displayName === (missing || multi ? 'positive' : name)).id, sourceInSec: .1, sourceOutSec: end });
+    if (multi) {
+      doc.version = 3; // Audio gain belongs to the existing v3 persistence schema.
+      const first = doc.project.clips[0].parts[0];
+      doc.project.clips[0].parts = [{ ...first, sourceOutSec: .4 },
+        { assetId: doc.project.assets.find(a => a.displayName === 'normal').id, sourceInSec: .4, sourceOutSec: .7 }];
+      doc.project.clips[0].audioGain = 0; // Selected source DL keeps original audio.
+    }
     await load(doc, name);
-    const posted = page.waitForResponse(r => r.url().endsWith('/api/jobs/export-segment') && r.request().method() === 'POST');
+    const posted = page.waitForResponse(r => r.url().endsWith(multi ? '/api/jobs/export-composition' : '/api/jobs/export-segment') && r.request().method() === 'POST');
     const downloadsBefore = downloads;
     const pendingDownload = missing ? null : page.waitForEvent('download', { timeout: 120000 });
     await page.getByTitle('選択クリップの素材切り出し。', { exact: false }).click();
     const response = await posted; assert(response.ok());
-    const payload = response.request().postDataJSON(); assert.equal(payload.startSec, .1); assert.equal(payload.endSec, end);
+    const payload = response.request().postDataJSON();
+    if (multi) { assert.equal(payload.clips[0].parts.length, 2); assert.equal(payload.clips[0].audioGain, undefined); }
+    else { assert.equal(payload.startSec, .1); assert.equal(payload.endSec, end); }
     const { jobId } = await response.json();
     if (missing) {
       await page.locator('.error-banner').filter({ hasText: '音声が欠落した書き出しを中止しました' }).waitFor({ timeout: 30000 });
@@ -87,6 +97,20 @@ async function load(doc, name) {
         assert.equal(probe.streams[0].width, 64); assert.equal(probe.streams[0].height, 64);
         await captureEvidenceScreenshot(page, `${evidence}/recovered-audio.png`);
         check('bounded positive-audio download matches independent fixed PCM/AAC and keeps native video dimensions');
+      } else if (multi) {
+        const actual = ff(['-xerror', '-i', out, '-vn', '-ac', '2', '-ar', '48000', '-f', 's16le', 'pipe:1']);
+        assert.equal(actual.length / 4, 29696);
+        const rms = (first, end) => {
+          let sum = 0; for (let n = first; n < end; n++) sum += actual.readInt16LE(n * 4) ** 2;
+          return Math.sqrt(sum / (end - first));
+        };
+        assert(rms(19440, 19920) > 4000); assert(rms(5040, 5520) < 1500);
+        const rgb = ff(['-xerror', '-i', out, '-map', '0:v:0', '-vf', 'crop=2:2:(iw-2)/2:(ih-2)/2,scale=1:1',
+          '-fps_mode', 'passthrough', '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1']);
+        assert.equal(rgb.length, 54);
+        for (let n = 0; n < 18; n++) { assert(rgb[n * 3 + 2] > 220); assert(rgb[n * 3] < 25); }
+        await captureEvidenceScreenshot(page, `${evidence}/multipart-recovered.png`);
+        check('multipart selected download restores actual first-part audio and keeps the normal later pulse at its fixed time');
       } else check(`${name} long source still downloads and fully decodes with its original stream contract`);
     }
     assert.deepEqual((await save()).project, doc.project);
