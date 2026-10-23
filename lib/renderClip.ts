@@ -2,6 +2,8 @@ import { multipartDurationArgument, planMultipartVideo } from "@/lib/multipartTi
 import type { Asset, Clip } from "@/lib/editor/types";
 import { resolveAssetInputPath } from "@/lib/assetResolve";
 import { imageToVideoSegment, probeMedia, probeVideo, runFfmpegCommand } from "@/lib/ffmpeg";
+import { containAudioInputIdentity } from "@/lib/containAudioRepair";
+import { recoverSelectedSegmentAudio } from "@/lib/selectedSegmentAudio";
 import { extractEditorSegment, repairSourceAvSegment } from "@/lib/sourceAvClock";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
@@ -12,9 +14,12 @@ import path from "node:path";
 export async function renderClipToFile(params: {
   clip: Clip; assets: readonly Asset[]; jobDir: string;
   outputPath: string; width: number; height: number;
+  /** Shared by all prepared clips in one export; only one optional attempt. */
+  sourceAudioRecoveryBudget?: { remaining: number };
 }): Promise<void> {
   const { clip, assets, jobDir, outputPath, width, height } = params;
   const paths: string[] = [];
+  const recoveryBudget = params.sourceAudioRecoveryBudget ?? { remaining: 1 };
   if (clip.kind === "title") throw new Error("タイトルは専用raster経路が必要です。");
   const plan = clip.parts.length > 1 ? planMultipartVideo(clip) : null;
   const streams: { video: boolean; audio: boolean }[] = [];
@@ -46,14 +51,29 @@ export async function renderClipToFile(params: {
         "-vf", `scale=${width}:${height},setsar=1,fps=30,format=yuv420p`,
         "-af", "aresample=48000,apad", "-ac", "2", "-ar", "48000",
         "-t", multipartDurationArgument(duration), "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart", out];
+      // Capture before extraction; normal outputs incur no extra subprocess.
+      // Only a bounded early source window can use the existing recovery.
+      const eligible = info?.hasAudio && recoveryBudget.remaining > 0 &&
+        duration >= 1 / 30 && duration <= 1 && part.sourceInSec >= 0 && part.sourceOutSec <= 5;
+      const inputIdentity = eligible ? await containAudioInputIdentity(input) : null;
       await runFfmpegCommand(args, { totalDurationSec: duration });
       if (asset.kind === "video") await repairSourceAvSegment({ input, output: out,
         start: part.sourceInSec, end: part.sourceOutSec, size: { width, height } });
       const media = await probeMedia(out);
       const video = Boolean(media.streams?.some(s => s.codec_type === "video"));
-      const audio = Boolean(media.streams?.some(s => s.codec_type === "audio"));
+      let audio = Boolean(media.streams?.some(s => s.codec_type === "audio"));
       if (plan!.parts[i].frames > 0 && !video)
         throw new Error("結合クリップの表示位置に必要な映像フレームを素材区間から取り出せません。");
+      // This is a source extraction, before gain/fades or audio-track choice.
+      // Never diagnose a final muted composition as missing source audio.
+      if (video && !audio && inputIdentity && recoveryBudget.remaining > 0) {
+        recoveryBudget.remaining--;
+        if (await recoverSelectedSegmentAudio({ input, output: out,
+          start: part.sourceInSec, end: part.sourceOutSec, inputIdentity }) === "repaired") {
+          audio = true; // The helper commits only a fully verified AV candidate.
+        }
+        // Unknown/failed recovery keeps the legacy empty-audio behavior.
+      }
       streams.push({ video, audio });
     }
     if (!paths.length) throw new Error("クリップに素材がありません。");

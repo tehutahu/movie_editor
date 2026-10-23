@@ -201,7 +201,8 @@ it.skipIf(!real)("documents unresolved late positive-origin audio content despit
     expect(rmsAt(actual, 9600, 10560)).toBeLessThan(1500);
   }
 }, 30000);
-it.skipIf(!real).each([false, true])("documents multipart missing-first=%s against fixed later-part audio and all-frame expectations", async missingFirst => {
+it.skipIf(!real).each(["normal", "repaired", "exhausted"])("multipart %s preserves the later-part audio clock within one recovery attempt", async mode => {
+  const missingFirst = mode !== "normal";
   const p = createEmptyProject(); p.compositionWidth = p.compositionHeight = 320; p.compositionDurationSec = .6;
   const a: Asset = { id: "matrix-first", kind: "video", ext: "mp4", displayName: "first", streamUrl: "/x", sourceDurationSec: 300 };
   const b: Asset = { ...a, id: "matrix-second", displayName: "second" };
@@ -211,21 +212,37 @@ it.skipIf(!real).each([false, true])("documents multipart missing-first=%s again
       { assetId: a.id, sourceInSec: .1, sourceOutSec: .4 }, { assetId: b.id, sourceInSec: .4, sourceOutSec: .7 },
     ] };
   p.clips = [c]; const saved = JSON.stringify(p), inputBytes = await Promise.all([normal, positive].map(f => readFile(f)));
-  const jobDir = path.join(dir, `multipart-matrix-${missingFirst}`); await mkdir(jobDir);
+  const jobDir = path.join(dir, `multipart-matrix-${mode}`); await mkdir(jobDir);
   const outputPath = path.join(jobDir, "out.mp4");
-  await renderClipToFile({ clip: c, assets: p.assets, jobDir, outputPath, width: 320, height: 320 });
+  await renderClipToFile({ clip: c, assets: p.assets, jobDir, outputPath, width: 320, height: 320,
+    sourceAudioRecoveryBudget: { remaining: mode === "exhausted" ? 0 : 1 } });
   expectBlueFrames(outputPath); expect(JSON.stringify(p)).toBe(saved);
   const actual = decodedStereo(outputPath);
-  if (!missingFirst) {
-    expect(actual.length / 4).toBe(29696);
-    expect(rmsAt(actual, 19440, 19920)).toBeGreaterThan(4000); // expected later pulse .405..415
-    expect(rmsAt(actual, 5040, 5520)).toBeLessThan(1500);
-  } else {
-    // Known failure: omitting the audio-less first part shortens audio to .32s
-    // and advances the *normal second part* by.3s. Do not call this synchronized.
+  if (mode === "exhausted") {
+    // A used job budget preserves the legacy result, not synthetic silence.
     expect(actual.length / 4).toBe(15360);
-    expect(actual.length / 4).toBeLessThan(19440); // expected pulse window is beyond EOF, not silent PCM
-    expect(rmsAt(actual, 5040, 5520)).toBeGreaterThan(4000); // observed .105..115
+    expect(actual.length / 4).toBeLessThan(19440);
+    expect(rmsAt(actual, 5040, 5520)).toBeGreaterThan(4000);
+  } else {
+    expect(actual.length / 4).toBe(29696);
+    expect(rmsAt(actual, 19440, 19920)).toBeGreaterThan(4000); // later normal pulse .405..415
+    expect(rmsAt(actual, 5040, 5520)).toBeLessThan(1500); // no .3s advance
+  }
+  if (mode === "normal") {
+    const legacy = path.join(jobDir, "legacy.mp4");
+    await renderClipToFile({ clip: c, assets: p.assets, jobDir, outputPath: legacy, width: 320, height: 320,
+      sourceAudioRecoveryBudget: { remaining: 0 } });
+    expect((await readFile(outputPath)).equals(await readFile(legacy))).toBe(true);
+    await rm(legacy);
+  }
+  if (mode === "repaired") {
+    c.audioGain = 0; const savedMuted = JSON.stringify(p), mutedDir = path.join(dir, "muted-recovery"); await mkdir(mutedDir);
+    const muted = path.join(mutedDir, "muted.mp4");
+    await exportCompositionToFile({ project: p, jobDir: mutedDir, outputPath: muted });
+    const silent = decodedStereo(muted); expect(silent.length / 4).toBe(29696);
+    expect(silent.every(byte => byte === 0)).toBe(true); expectBlueFrames(muted);
+    expect(await readdir(mutedDir)).toEqual(["muted.mp4"]);
+    expect(JSON.stringify(p)).toBe(savedMuted); delete c.audioGain;
   }
   for (const [i, file] of [normal, positive].entries()) expect((await readFile(file)).equals(inputBytes[i])).toBe(true);
   expect(await readdir(jobDir)).toEqual(["out.mp4"]);
