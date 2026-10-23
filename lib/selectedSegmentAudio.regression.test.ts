@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { extractSegmentTimes, probeMedia, resolveFfmpegPath, resolveFfprobePath } from "./ffmpeg";
@@ -8,6 +8,7 @@ import { extractEditorSegment, repairSourceAvSegment } from "./sourceAvClock";
 import { containAudioInputIdentity } from "./containAudioRepair";
 import { hasProvenSelectedAudioLoss, recoverSelectedSegmentAudio } from "./selectedSegmentAudio";
 import { exportCompositionToFile } from "./exportComposition";
+import { renderClipToFile } from "./renderClip";
 import { createEmptyProject } from "./editor/project";
 import type { Asset, MediaClip } from "./editor/types";
 
@@ -23,7 +24,7 @@ beforeAll(async () => {
   dir = await mkdtemp(path.join(tmpdir(), "selected-audio-loss-"));
   normal = path.join(dir, "normal.mp4"); positive = path.join(dir, "positive.mp4");
   gap = path.join(dir, "gap.mp4"); silent = path.join(dir, "silent.mp4"); short = path.join(dir, "short.mp4"); noaudio = path.join(dir, "noaudio.mp4");
-  ff(["-f", "lavfi", "-i", "color=blue:s=64x64:r=30:d=300", "-f", "lavfi", "-i", "aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*gte(t\\,0.5)*lt(t\\,0.52):s=48000:d=300",
+  ff(["-f", "lavfi", "-i", "color=blue:s=64x64:r=30:d=300", "-f", "lavfi", "-i", "aevalsrc=0.035*sin(2*PI*440*t)+0.35*sin(2*PI*2000*t)*(gte(t\\,0.5)*lt(t\\,0.52)+gte(t\\,250.5)*lt(t\\,250.52)):s=48000:d=300",
     "-c:v", "libx264", "-preset", "ultrafast", "-g", "60", "-bf", "0", "-c:a", "aac", normal]);
   ff(["-copyts", "-i", normal, "-itsoffset", "2", "-i", normal, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-avoid_negative_ts", "disabled", positive]);
   ff(["-copyts", "-i", positive, "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", "-bsf:a",
@@ -152,4 +153,80 @@ it.skipIf(!real)("healthy, gap, short, noaudio and oversized windows retain the 
   const p = await oldOutput(positive, "too-long"), output = path.join(dir, "too-long-window.mp4");
   await extractSegmentTimes({ inputPath: positive, outputPath: output, startSec: .1, endSec: 1.2 }); const before = await readFile(output);
   expect(await recoverSelectedSegmentAudio({ ...p, output, end: 1.2 })).toBe("missing"); expect(await readFile(output)).toEqual(before);
+}, 30000);
+
+
+function rmsAt(pcm: Buffer, first: number, end: number) {
+  // The caller must prove this fixed window exists; absent audio is not silence.
+  expect(pcm.length).toBeGreaterThanOrEqual(end * 4);
+  let sum = 0;
+  for (let n = first; n < end; n++) sum += pcm.readInt16LE(n * 4) ** 2;
+  return Math.sqrt(sum / (end - first));
+}
+function decodedStereo(file: string) {
+  return ff(["-xerror", "-i", file, "-vn", "-ac", "2", "-ar", "48000", "-f", "s16le", "pipe:1"]);
+}
+function expectBlueFrames(file: string) {
+  const rgb = ff(["-xerror", "-i", file, "-map", "0:v:0", "-vf", "crop=2:2:(iw-2)/2:(ih-2)/2,scale=1:1",
+    "-fps_mode", "passthrough", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"]);
+  expect(rgb.length).toBe(18 * 3);
+  for (let n = 0; n < 18; n++) {
+    expect(rgb[n * 3 + 2]).toBeGreaterThan(220); expect(rgb[n * 3]).toBeLessThan(25);
+  }
+}
+it.skipIf(!real)("documents unresolved late positive-origin audio content despite present AV, with a correct-clock control", async () => {
+  // Literal test-only indices: source250.1 at48k, window.6. Neither seek
+  // formatting nor metadata offsets determine the independent source reference.
+  const selected = Buffer.alloc(28800 * 8), full = await open(path.join(dir, "mono-full.pcm"), "r");
+  try { expect((await full.read(selected, 0, selected.length, 12004800 * 8)).bytesRead).toBe(selected.length); }
+  finally { await full.close(); }
+  const raw = path.join(dir, "late-reference.pcm"), reference = raw + ".m4a";
+  await writeFile(raw, selected);
+  ff(["-f", "f32le", "-ac", "2", "-ar", "48000", "-i", raw, "-c:a", "aac", "-movie_timescale", "48000", reference]);
+  // AAC priming remains part of the positive-origin full decode. The fixed
+  // .426..436 window is inside its expected .421333..441333 pulse.
+  expect(rmsAt(decodedStereo(reference), 20448, 20928)).toBeGreaterThan(4000);
+  for (const [name, input] of [["normal", normal], ["positive", positive]]) {
+    const output = path.join(dir, `late-${name}.mp4`), inputIdentity = await containAudioInputIdentity(input);
+    const sourceBytes = await readFile(input);
+    await extractEditorSegment({ inputPath: input, outputPath: output, startSec: 250.1, endSec: 250.7 });
+    const before = await readFile(output);
+    expect((await probeMedia(output)).streams?.map(s => s.codec_type)).toEqual(["video", "audio"]);
+    expect(await recoverSelectedSegmentAudio({ input, output, start: 250.1, end: 250.7, inputIdentity })).toBe("unchanged");
+    expect((await readFile(output)).equals(before)).toBe(true);
+    expect((await readFile(input)).equals(sourceBytes)).toBe(true); expectBlueFrames(output);
+    const actual = decodedStereo(output);
+    if (name === "normal") expect(rmsAt(actual, 19440, 19920)).toBeGreaterThan(4000); // fixed .405..415
+    else expect(rmsAt(actual, 20448, 20928)).toBeLessThan(1500); // known unresolved mismatch, not successful recovery
+    expect(rmsAt(actual, 9600, 10560)).toBeLessThan(1500);
+  }
+}, 30000);
+it.skipIf(!real).each([false, true])("documents multipart missing-first=%s against fixed later-part audio and all-frame expectations", async missingFirst => {
+  const p = createEmptyProject(); p.compositionWidth = p.compositionHeight = 320; p.compositionDurationSec = .6;
+  const a: Asset = { id: "matrix-first", kind: "video", ext: "mp4", displayName: "first", streamUrl: "/x", sourceDurationSec: 300 };
+  const b: Asset = { ...a, id: "matrix-second", displayName: "second" };
+  p.assets = [a, b]; sources.set(a.id, missingFirst ? positive : normal); sources.set(b.id, normal);
+  const c: MediaClip = { id: "matrix", trackId: p.tracks[0].id, timelineStartSec: 0, durationSec: .6,
+    transform: { x: .5, y: .5, scale: 1 }, parts: [
+      { assetId: a.id, sourceInSec: .1, sourceOutSec: .4 }, { assetId: b.id, sourceInSec: .4, sourceOutSec: .7 },
+    ] };
+  p.clips = [c]; const saved = JSON.stringify(p), inputBytes = await Promise.all([normal, positive].map(f => readFile(f)));
+  const jobDir = path.join(dir, `multipart-matrix-${missingFirst}`); await mkdir(jobDir);
+  const outputPath = path.join(jobDir, "out.mp4");
+  await renderClipToFile({ clip: c, assets: p.assets, jobDir, outputPath, width: 320, height: 320 });
+  expectBlueFrames(outputPath); expect(JSON.stringify(p)).toBe(saved);
+  const actual = decodedStereo(outputPath);
+  if (!missingFirst) {
+    expect(actual.length / 4).toBe(29696);
+    expect(rmsAt(actual, 19440, 19920)).toBeGreaterThan(4000); // expected later pulse .405..415
+    expect(rmsAt(actual, 5040, 5520)).toBeLessThan(1500);
+  } else {
+    // Known failure: omitting the audio-less first part shortens audio to .32s
+    // and advances the *normal second part* by.3s. Do not call this synchronized.
+    expect(actual.length / 4).toBe(15360);
+    expect(actual.length / 4).toBeLessThan(19440); // expected pulse window is beyond EOF, not silent PCM
+    expect(rmsAt(actual, 5040, 5520)).toBeGreaterThan(4000); // observed .105..115
+  }
+  for (const [i, file] of [normal, positive].entries()) expect((await readFile(file)).equals(inputBytes[i])).toBe(true);
+  expect(await readdir(jobDir)).toEqual(["out.mp4"]);
 }, 30000);
